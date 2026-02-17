@@ -1,4 +1,5 @@
 """AI Agent 交易工具 - 對應 Nanobot Tool 概念"""
+import random
 from typing import Any, Dict, Optional
 import logging
 from datetime import datetime
@@ -28,6 +29,11 @@ class TradingTools:
         self.risk_mgr = risk_manager
         self.api = shioaji_client
         self.notifier = notifier
+        
+        self._pending_strategy: Optional[Dict[str, Any]] = None
+        self._awaiting_symbol: bool = False
+        self._awaiting_confirm: bool = False
+        self._current_goal: Optional[str] = None
     
     # ========== 策略工具 ==========
     
@@ -253,6 +259,254 @@ ID: {strategy_id}
         self.strategy_mgr.delete_strategy(strategy_id)
         
         return f"✅ 策略已刪除: {strategy_id}"
+    
+    def create_strategy_by_goal(self, goal: str, symbol: Optional[str] = None) -> str:
+        """根據用戶目標建立策略（自動推斷參數）
+        
+        當用戶說「幫我建立策略」時調用此 tool。
+        - 若 symbol 為 None，回覆訊息要求用戶指定期貨代碼
+        - 若 symbol 已提供，推斷參數並展示，詢問確認
+        """
+        if symbol is None or symbol.strip() == "":
+            self._awaiting_symbol = True
+            self._current_goal = goal
+            self._pending_strategy = None
+            self._awaiting_confirm = False
+            return "請問要使用哪個期貨合約？（如 TXF、MXF、EFF）"
+        
+        symbol = symbol.upper().strip()
+        
+        valid_symbols = ["TXF", "MXF", "EFF", "T5F", "XIF"]
+        if symbol not in valid_symbols:
+            return f"❌ 無效的期貨代碼：{symbol}，請輸入有效的代碼（如 TXF、MXF、EFF）"
+        
+        self._awaiting_symbol = False
+        self._awaiting_confirm = True
+        self._current_goal = goal
+        
+        inferred = self._infer_strategy_params(goal, symbol)
+        
+        self._pending_strategy = inferred
+        
+        return self._format_strategy_confirmation(inferred)
+    
+    def _infer_strategy_params(self, goal: str, symbol: str) -> Dict[str, Any]:
+        """根據目標推斷策略參數"""
+        import random
+        import hashlib
+        
+        goal_lower = goal.lower()
+        
+        if "rsi" in goal_lower:
+            name = f"RSI策略_{symbol}"
+            prompt = "RSI 低於 30 買入，RSI 高於 70 賣出"
+            timeframe = "15m"
+            stop_loss = 30
+            take_profit = 50
+        elif "macd" in goal_lower or "金叉" in goal_lower or "死叉" in goal_lower:
+            name = f"MACD策略_{symbol}"
+            prompt = "MACD 金叉買入，死叉賣出"
+            timeframe = "15m"
+            stop_loss = 40
+            take_profit = 60
+        elif "均線" in goal_lower or "均線" in goal:
+            name = f"均線策略_{symbol}"
+            prompt = "價格站上均線買入，跌破均線賣出"
+            timeframe = "15m"
+            stop_loss = 30
+            take_profit = 50
+        elif "突破" in goal_lower:
+            name = f"突破策略_{symbol}"
+            prompt = "價格突破當日高點買入，跌破低點賣出"
+            timeframe = "15m"
+            stop_loss = 40
+            take_profit = 80
+        elif "每日" in goal_lower or "500" in goal_lower or "賺" in goal_lower:
+            name = f"每日收益策略_{symbol}"
+            prompt = "價格站上均線買入，跌破均線賣出，配合移動停損"
+            timeframe = "15m"
+            stop_loss = 30
+            take_profit = 50
+        elif "動量" in goal_lower or " momentum" in goal_lower:
+            name = f"動量策略_{symbol}"
+            prompt = "價格動量向上時買入，向下時賣出"
+            timeframe = "1h"
+            stop_loss = 50
+            take_profit = 100
+        else:
+            name = f"趨勢策略_{symbol}"
+            prompt = "價格趨勢向上買入，向下賣出"
+            timeframe = "15m"
+            stop_loss = 30
+            take_profit = 50
+        
+        strategy_id = f"auto_{name.lower().replace(' ', '_')[:15]}_{random.randint(100, 999)}"
+        
+        return {
+            "strategy_id": strategy_id,
+            "name": name,
+            "symbol": symbol,
+            "prompt": prompt,
+            "timeframe": timeframe,
+            "quantity": 1,
+            "stop_loss": stop_loss,
+            "take_profit": take_profit,
+            "goal": goal
+        }
+    
+    def _format_strategy_confirmation(self, params: Dict[str, Any]) -> str:
+        """格式化策略確認訊息"""
+        return f"""
+📋 *策略參數確認*
+────────────────
+請確認以下參數是否正確：
+
+• 名稱: {params['name']}
+• 期貨代碼: {params['symbol']}
+• 策略描述: {params['prompt']}
+• K線週期: {params['timeframe']}
+• 交易口數: {params['quantity']}
+• 停損: {params['stop_loss']}點
+• 止盈: {params['take_profit']}點
+
+────────────────
+輸入「確認」建立策略，或修改部分參數（如「停損改成50點」）
+"""
+    
+    def modify_strategy_params(self, modifications: str) -> str:
+        """修改待確認的策略參數，並重新生成策略 prompt"""
+        if not self._pending_strategy or not self._awaiting_confirm:
+            return "❌ 沒有待確認的策略，請先說「幫我建立策略」"
+        
+        modifications_lower = modifications.lower()
+        params = self._pending_strategy
+        modified = False
+        
+        if "停損" in modifications and "改成" in modifications:
+            try:
+                new_stop_loss = int(modifications.split("改成")[1].split("點")[0].strip())
+                params["stop_loss"] = new_stop_loss
+                modified = True
+            except (ValueError, IndexError):
+                return "❌ 無法解析停損參數，請使用格式「停損改成XX點」"
+        
+        if "止盈" in modifications and "改成" in modifications:
+            try:
+                new_take_profit = int(modifications.split("改成")[1].split("點")[0].strip())
+                params["take_profit"] = new_take_profit
+                modified = True
+            except (ValueError, IndexError):
+                return "❌ 無法解析止盈參數，請使用格式「止盈改成XX點」"
+        
+        if "週期" in modifications and "改成" in modifications:
+            new_timeframe = modifications.split("改成")[1].strip()
+            valid_timeframes = ["1m", "5m", "15m", "30m", "60m", "1h", "1d"]
+            if new_timeframe in valid_timeframes:
+                params["timeframe"] = new_timeframe
+                modified = True
+            else:
+                return f"❌ 無效的K線週期，請使用 {', '.join(valid_timeframes)}"
+        
+        if "口數" in modifications and "改成" in modifications:
+            try:
+                new_quantity = int(modifications.split("改成")[1].strip())
+                if new_quantity >= 1:
+                    params["quantity"] = new_quantity
+                    modified = True
+                else:
+                    return "❌ 口數必須 >= 1"
+            except ValueError:
+                return "❌ 無法解析口數參數，請使用格式「口數改成X」"
+        
+        if "期貨代碼" in modifications and "改成" in modifications:
+            new_symbol = modifications.split("改成")[1].strip().upper()
+            valid_symbols = ["TXF", "MXF", "EFF", "T5F", "XIF"]
+            if new_symbol in valid_symbols:
+                params["symbol"] = new_symbol
+                modified = True
+            else:
+                return f"❌ 無效的期貨代碼，請使用 {', '.join(valid_symbols)}"
+        
+        if not modified:
+            return "❌ 無法解析修改內容，請使用格式如「停損改成50點」或「止盈改成100點」"
+        
+        prompt_addition = ""
+        if params["stop_loss"] > 40:
+            prompt_addition += "，嚴格執行停損"
+        if params["take_profit"] > params["stop_loss"] * 2:
+            prompt_addition += "，採用移動停損保護獲利"
+        
+        if prompt_addition:
+            params["prompt"] = params["prompt"] + prompt_addition
+        
+        self._pending_strategy = params
+        
+        return f"""
+✏️ *參數已更新*
+────────────────
+{self._format_strategy_confirmation(params)}
+
+────────────────
+輸入「確認」建立策略，或繼續修改參數
+"""
+    
+    def confirm_create_strategy(self, confirmed: bool) -> str:
+        """確認或取消建立策略"""
+        if not self._pending_strategy or not self._awaiting_confirm:
+            self._clear_pending()
+            return "❌ 沒有待確認的策略，請先說「幫我建立策略」"
+        
+        if not confirmed:
+            self._clear_pending()
+            return "❌ 已取消建立策略"
+        
+        params = self._pending_strategy
+        
+        if self.strategy_mgr.get_strategy(params["strategy_id"]):
+            params["strategy_id"] = f"{params['strategy_id']}_{random.randint(1000, 9999)}"
+        
+        from src.trading.strategy import Strategy
+        
+        strategy = Strategy(
+            strategy_id=params["strategy_id"],
+            name=params["name"],
+            symbol=params["symbol"],
+            prompt=params["prompt"],
+            params={
+                "timeframe": params["timeframe"],
+                "quantity": params["quantity"],
+                "stop_loss": params["stop_loss"],
+                "take_profit": params["take_profit"]
+            },
+            enabled=False
+        )
+        
+        self.strategy_mgr.add_strategy(strategy)
+        
+        result = f"""
+✅ *策略已建立*
+────────────────
+ID: {params['strategy_id']}
+名稱: {params['name']}
+期貨代碼: {params['symbol']}
+策略描述: {params['prompt']}
+K線週期: {params['timeframe']}
+數量: {params['quantity']}
+停損: {params['stop_loss']}點
+止盈: {params['take_profit']}點
+
+請使用 `enable {params['strategy_id']}` 啟用策略
+"""
+        
+        self._clear_pending()
+        return result
+    
+    def _clear_pending(self) -> None:
+        """清除待確認的策略狀態"""
+        self._pending_strategy = None
+        self._awaiting_symbol = False
+        self._awaiting_confirm = False
+        self._current_goal = None
     
     # ========== 部位工具 ==========
     
@@ -742,6 +996,49 @@ Shioaji: {'✅ 連線' if conn_status else '❌ 斷線'}
                     }
                 }
             },
+            {
+                "type": "function",
+                "function": {
+                    "name": "create_strategy_by_goal",
+                    "description": "根據用戶目標自動推斷參數並建立策略。當用戶說「幫我建立策略」時調用。若未提供期貨代碼，會詢問用戶。",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "goal": {"type": "string", "description": "用戶的目標描述（如「幫我建立RSI策略」「設計一個每日賺500元的策略」）"},
+                            "symbol": {"type": "string", "description": "期貨代碼（如 TXF、MXF、EFF），若不提供則會詢問用戶"}
+                        },
+                        "required": ["goal"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "modify_strategy_params",
+                    "description": "修改待確認的策略參數（如停損、止盈、K線週期等），並重新生成策略描述。",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "modifications": {"type": "string", "description": "修改內容（如「停損改成50點」「止盈改成100點」或「K線週期改成30m」）"}
+                        },
+                        "required": ["modifications"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "confirm_create_strategy",
+                    "description": "確認或取消建立策略。當用戶說「確認」或「取消」時調用。",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "confirmed": {"type": "boolean", "description": "True 表示確認建立，False 表示取消"}
+                        },
+                        "required": ["confirmed"]
+                    }
+                }
+            },
         ]
     
     def execute_tool(self, tool_name: str, arguments: dict) -> str:
@@ -772,6 +1069,16 @@ Shioaji: {'✅ 連線' if conn_status else '❌ 斷線'}
                 new_prompt=arguments.get("new_prompt", "")
             ),
             "delete_strategy": lambda: self.delete_strategy_tool(arguments.get("strategy_id", "")),
+            "create_strategy_by_goal": lambda: self.create_strategy_by_goal(
+                goal=arguments.get("goal", ""),
+                symbol=arguments.get("symbol")
+            ),
+            "modify_strategy_params": lambda: self.modify_strategy_params(
+                modifications=arguments.get("modifications", "")
+            ),
+            "confirm_create_strategy": lambda: self.confirm_create_strategy(
+                confirmed=arguments.get("confirmed", False)
+            ),
         }
         
         tool = tool_map.get(tool_name)

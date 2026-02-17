@@ -5,6 +5,7 @@
 ## 功能特色
 
 - 🤖 **AI 策略生成** - 用自然語言描述策略，LLM 自動生成程式碼
+- 🎯 **目標驅動策略** - 只需給出目標（如「每日賺500元」），LLM 自動推斷參數並確認後建立
 - 📊 **多種 LLM 支援** - Ollama, OpenAI, Anthropic, DeepSeek, OpenRouter
 - 📈 **技術指標** - 支援 RSI, MACD, SMA, EMA, BB, ATR, KD 等（使用 pandas_ta）
 - 🔔 **Telegram 通知** - 下單、成交、風控警告即時通知
@@ -45,11 +46,20 @@ telegram:
 python main.py
 ```
 
-### 透過 Agent 建立策略
+### 建立策略的兩種方式
 
+#### 方式一：手動輸入完整參數
 ```
 建立策略 ID=my_rsi, 名稱=RSI策略, 代碼=TXF, 描述=RSI低於30買入高於70賣出, 週期=15m, 數量=1, 停損=50, 停利=100
 ```
+
+#### 方式二：目標驅動（自動推斷參數）
+```
+幫我設計一個 RSI 策略
+設計一個每日賺500元的策略
+```
+
+LLM 會自動推斷參數，展示給用戶確認後建立策略。
 
 ### 指令列表
 
@@ -69,7 +79,6 @@ ai_futures_trading/
 ├── config.yaml            # 配置文件
 ├── requirements.txt       # Python 依賴
 ├── AGENTS.md             # Agent 開發指南
-├── .gitignore            # Git 忽略設定
 │
 ├── src/
 │   ├── api/              # Shioaji API 包裝
@@ -121,7 +130,7 @@ ai_futures_trading/
 ├── tests/               # 測試檔案
 │   └── test_trading.py
 │
-└── workspace/          # 執行時資料（不會上傳）
+└── workspace/          # 執行時資料
     ├── strategies.json
     ├── positions.json
     ├── orders.json

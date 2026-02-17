@@ -60,7 +60,10 @@
 
 | Tool 名稱 | 功能 | 參數 |
 |-----------|------|------|
-| `create_strategy` | 建立新策略 | strategy_id, name, symbol, prompt, timeframe, quantity, stop_loss, take_profit |
+| `create_strategy` | 建立新策略（手動輸入完整參數） | strategy_id, name, symbol, prompt, timeframe, quantity, stop_loss, take_profit |
+| `create_strategy_by_goal` | **目標驅動建立策略**（自動推斷參數） | goal, symbol |
+| `modify_strategy_params` | 修改待確認的策略參數 | modifications |
+| `confirm_create_strategy` | 確認或取消建立策略 | confirmed |
 | `update_strategy_prompt` | 更新策略描述 | strategy_id, new_prompt |
 | `delete_strategy` | 刪除策略 | strategy_id |
 | `enable_strategy` | 啟用策略 | strategy_id |
@@ -80,6 +83,54 @@
 | quantity | 必須 >= 1 |
 | stop_loss | 必須 >= 0 (0=不啟用) |
 | take_profit | 必須 >= 0 (0=不啟用) |
+
+### 2.2 目標驅動策略建立
+
+系統提供兩種建立策略的方式：
+
+#### A. 手動輸入完整參數（原有方式）
+用戶提供所有必要參數：
+```
+建立策略 ID=my_rsi, 名稱=RSI策略, 代碼=TXF, 描述=RSI低於30買入高於70賣出, 週期=15m
+```
+
+#### B. 目標驅動（新增功能）
+用戶只給出目標，LLM 自動推斷參數：
+
+| 用戶輸入 | LLM 行為 |
+|---------|---------|
+| 「幫我建立 RSI 策略」 | 詢問期貨代碼 |
+| 「設計一個每日賺500元的策略」 | 詢問期貨代碼 |
+| 提供 symbol 後 | 推斷參數，展示並要求確認 |
+| 「停損改成50點」 | 更新參數，重新展示 |
+| 「確認」 | 建立策略 |
+
+##### 目標驅動流程
+
+1. **接收目標**：用戶描述想要的策略
+2. **詢問期貨代碼**：若未提供，必須詢問用戶
+3. **推斷參數**：自動生成策略名稱、描述、K線週期、停損止盈
+4. **展示確認**：將參數展示給用戶，詢問是否正確
+5. **修改參數**：用戶可修改部分參數（如「停損改成50點」）
+6. **建立完成**：確認後建立策略
+
+##### 可修改的參數
+
+| 參數 | 範例 |
+|------|------|
+| 停損 | 「停損改成50點」 |
+| 止盈 | 「止盈改成100點」 |
+| K線週期 | 「週期改成30m」 |
+| 交易口數 | 「口數改成2」 |
+| 期貨代碼 | 「期貨代碼改成MXF」 |
+
+##### LLM 意圖判斷
+
+| 用戶輸入 | 調用 Tool |
+|---------|----------|
+| 「幫我建立...」「設計一個...」 | `create_strategy_by_goal` |
+| 提供了完整參數（ID+名稱+描述+週期） | `create_strategy` |
+| 不確定時 | 優先使用 `create_strategy_by_goal` |
 
 ### 2.2 策略 Prompt 輸入
 
