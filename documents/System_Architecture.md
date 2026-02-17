@@ -207,9 +207,24 @@
 
 | 檔案 | 說明 |
 |------|------|
-| `tools.py` | AI Agent 交易工具集 |
+| `tools.py` | AI Agent 交易工具集 (含策略管理工具) |
 | `prompts.py` | 系統提示詞 |
 | `providers.py` | LLM 提供者 (Ollama/OpenAI/Anthropic/DeepSeek/OpenRouter) |
+
+#### Agent Tools 一覽
+
+| Tool 名稱 | 功能 |
+|-----------|------|
+| `create_strategy` | 建立新策略 |
+| `update_strategy_prompt` | 更新策略描述 |
+| `delete_strategy` | 刪除策略 |
+| `enable_strategy` | 啟用策略 |
+| `disable_strategy` | 停用策略 |
+| `place_order` | 手動下單 |
+| `close_position` | 平倉 |
+| `get_positions` | 取得部位 |
+| `get_strategies` | 取得策略列表 |
+| `get_performance` | 取得績效 |
 
 ---
 
