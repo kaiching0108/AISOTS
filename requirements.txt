@@ -1,0 +1,17 @@
+# AI Futures Trading System Dependencies
+
+# Core
+shioaji>=1.0.0
+pyyaml>=6.0
+pydantic>=2.0
+
+# Data Analysis
+numpy>=1.24.0
+pandas>=2.0
+pandas_ta>=0.3.14
+
+# HTTP Client
+httpx>=0.24
+
+# Notifications
+python-telegram-bot>=20.0

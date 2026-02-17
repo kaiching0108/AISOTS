@@ -1,0 +1,492 @@
+"""AI 期貨交易系統 - 主程式"""
+import asyncio
+import logging
+import sys
+from pathlib import Path
+from datetime import datetime, time
+import signal
+
+# 添加專案根目錄到 Python 路徑
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from src.config import load_config, ensure_workspace, get_workspace_dir
+from src.api import ShioajiClient, ConnectionManager, OrderCallbackHandler
+from src.trading import StrategyManager, PositionManager, OrderManager
+from src.risk import RiskManager
+from src.notify import TelegramNotifier
+from src.agent import TradingTools, get_system_prompt
+from src.agent.providers import create_llm_provider
+from src.engine import StrategyRunner
+
+
+class AITradingSystem:
+    """AI 期貨交易系統主控制器"""
+    
+    def __init__(self, config_path: str = "config.yaml"):
+        # 載入配置
+        self.config = load_config(config_path)
+        
+        # 確保工作目錄存在
+        ensure_workspace()
+        
+        # 初始化日誌
+        self._setup_logging()
+        
+        self.logger = logging.getLogger(__name__)
+        
+        # 初始化各模組
+        workspace = get_workspace_dir()
+        
+        # Shioaji API
+        self.shioaji = ShioajiClient(
+            api_key=self.config.shioaji.api_key,
+            secret_key=self.config.shioaji.secret_key,
+            simulation=self.config.shioaji.simulation
+        )
+        
+        # 連線管理
+        self.connection_mgr = ConnectionManager(
+            self.shioaji,
+            self.config.risk.model_dump()
+        )
+        
+        # 訂單回調
+        self.order_callback = OrderCallbackHandler()
+        
+        # 策略管理
+        self.strategy_mgr = StrategyManager(workspace)
+        
+        # 部位管理
+        self.position_mgr = PositionManager(workspace)
+        
+        # 下單管理
+        self.order_mgr = OrderManager(workspace)
+        
+        # 風控管理
+        self.risk_mgr = RiskManager(self.config.risk.dict())
+        
+        # 通知
+        self.notifier = TelegramNotifier(self.config.telegram.model_dump())
+        
+        # AI 交易工具
+        self.trading_tools = TradingTools(
+            strategy_manager=self.strategy_mgr,
+            position_manager=self.position_mgr,
+            order_manager=self.order_mgr,
+            risk_manager=self.risk_mgr,
+            shioaji_client=self.shioaji,
+            notifier=self.notifier
+        )
+        
+        # 策略執行器
+        self.strategy_runner = StrategyRunner(
+            strategy_manager=self.strategy_mgr,
+            position_manager=self.position_mgr,
+            order_manager=self.order_mgr,
+            shioaji_client=self.shioaji,
+            risk_manager=self.risk_mgr,
+            llm_provider=self.llm_provider,
+            notifier=self.notifier,
+            on_signal=self._on_strategy_signal
+        )
+        
+        # LLM Provider (lazy loading)
+        self._llm_provider = None
+        
+        # 系統狀態
+        self.is_running = False
+        self.main_loop_task = None
+    
+    @property
+    def llm_provider(self):
+        """Lazy loading LLM provider"""
+        if self._llm_provider is None:
+            self._llm_provider = create_llm_provider(self.config.llm)
+        return self._llm_provider
+    
+    async def _on_strategy_signal(self, strategy, signal: str) -> None:
+        """策略訊號回調
+        
+        Args:
+            strategy: 策略對象
+            signal: 交易訊號
+        """
+        self.logger.info(f"Strategy signal: {strategy.name} -> {signal}")
+        
+        # 取得部位
+        position = self.position_mgr.get_position(strategy.id)
+        
+        # 從策略參數取得停損止盈點數
+        stop_loss = strategy.params.get("stop_loss", 0)
+        take_profit = strategy.params.get("take_profit", 0)
+        
+        # 根據訊號執行
+        if signal == "buy" and not position:
+            result = self.trading_tools.place_order(
+                strategy_id=strategy.id,
+                action="Buy",
+                quantity=strategy.params.get("quantity", 1),
+                reason=f"策略訊號: {signal}",
+                stop_loss=stop_loss,
+                take_profit=take_profit
+            )
+            self.notifier.send_message(result)
+            
+        elif signal == "sell" and position:
+            result = self.trading_tools.close_position(
+                strategy_id=strategy.id,
+                price=0
+            )
+            self.notifier.send_message(result)
+    
+    def _setup_logging(self) -> None:
+        """設定日誌"""
+        log_config = self.config.logging
+        logging.basicConfig(
+            level=getattr(logging, log_config.level),
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            handlers=[
+                logging.FileHandler(log_config.file),
+                logging.StreamHandler()
+            ]
+        )
+    
+    async def initialize(self) -> bool:
+        """初始化系統"""
+        self.logger.info("=" * 50)
+        self.logger.info("AI 期貨交易系統初始化中...")
+        self.logger.info("=" * 50)
+        
+        # 登入 Shioaji
+        if not self.shioaji.login():
+            self.logger.error("Shioaji 登入失敗")
+            return False
+        
+        # 設置連線事件處理
+        self.connection_mgr.setup_event_handlers()
+        
+        # 設置訂單回調
+        self.shioaji.set_order_callback(self.order_callback.create_callback())
+        
+        # 綁定訂單事件
+        self.order_callback.on_order_filled = self._on_order_filled
+        self.order_callback.on_order_cancelled = self._on_order_cancelled
+        
+        # 綁定連線事件
+        self.connection_mgr.on_disconnected = self._on_disconnected
+        self.connection_mgr.on_reconnected = self._on_reconnected
+        
+        # 顯示策略狀態
+        strategies = self.strategy_mgr.get_all_strategies()
+        self.logger.info(f"載入 {len(strategies)} 個策略:")
+        for s in strategies:
+            self.logger.info(f"  - {s.name} ({s.symbol}): {'啟用' if s.enabled else '停用'}")
+        
+        # 發送啟動通知
+        mode = "模擬" if self.config.shioaji.simulation else "實盤"
+        self.notifier.send_message(
+            f"🤖 *AI 期貨交易系統啟動*\n\n"
+            f"模式: {mode}\n"
+            f"策略數: {len(strategies)}\n"
+            f"風控: 單日最大虧損 {self.config.risk.max_daily_loss} 元"
+        )
+        
+        return True
+    
+    def _on_order_filled(self, order) -> None:
+        """成交回調"""
+        self.logger.info(f"訂單成交: {order.order_id}")
+        
+        # 發送通知
+        self.notifier.send_order_notification({
+            "status": "Filled",
+            "strategy_name": order.strategy_name,
+            "symbol": order.symbol,
+            "action": order.action,
+            "quantity": order.quantity,
+            "filled_price": order.filled_price,
+            "timestamp": order.filled_time
+        })
+    
+    def _on_order_cancelled(self, order) -> None:
+        """取消回調"""
+        self.logger.info(f"訂單取消: {order.order_id}")
+        
+        self.notifier.send_order_notification({
+            "status": "Cancelled",
+            "strategy_name": order.strategy_name,
+            "symbol": order.symbol,
+            "action": order.action,
+            "quantity": order.quantity,
+            "timestamp": datetime.now().isoformat()
+        })
+    
+    def _on_disconnected(self) -> None:
+        """斷線回調"""
+        self.logger.warning("Shioaji 連線中斷")
+        self.notifier.send_alert("連線中斷", "Shioaji 連線已中斷，系統正在嘗試重新連線...")
+    
+    def _on_reconnected(self) -> None:
+        """重連回調"""
+        self.logger.info("Shioaji 重新連線")
+        self.notifier.send_message("✅ Shioaji 重新連線成功")
+    
+    async def start(self) -> None:
+        """啟動系統"""
+        if not await self.initialize():
+            self.logger.error("系統初始化失敗")
+            return
+        
+        self.is_running = True
+        self.logger.info("系統啟動完成，開始執行主迴圈...")
+        
+        # 啟動主迴圈
+        self.main_loop_task = asyncio.create_task(self._main_loop())
+        
+        # 等待
+        try:
+            await self.main_loop_task
+        except asyncio.CancelledError:
+            self.logger.info("主迴圈已取消")
+    
+    async def stop(self) -> None:
+        """停止系統"""
+        self.logger.info("系統正在停止...")
+        self.is_running = False
+        
+        if self.main_loop_task:
+            self.main_loop_task.cancel()
+            try:
+                await self.main_loop_task
+            except asyncio.CancelledError:
+                pass
+        
+        # 登出
+        self.shioaji.logout()
+        
+        # 發送停止通知
+        self.notifier.send_message("🛑 AI 期貨交易系統已停止")
+        
+        self.logger.info("系統已停止")
+    
+    async def _main_loop(self) -> None:
+        """主迴圈 - 定時任務"""
+        check_interval = self.config.trading.check_interval
+        
+        while self.is_running:
+            try:
+                # 1. 檢查連線
+                if not self.connection_mgr.is_connected:
+                    self.logger.warning("連線中斷，嘗試重連...")
+                    if not self.connection_mgr.handle_disconnect():
+                        self.logger.error("重連失敗")
+                        await asyncio.sleep(30)
+                        continue
+                
+                # 2. 更新部位價格
+                await self._update_positions()
+                
+                # 3. 檢查停損止盈
+                await self._check_stop_loss_take_profit()
+                
+                # 4. 執行策略訊號
+                await self.strategy_runner.run_all_strategies()
+                
+                # 5. 更新當日損益
+                daily_pnl = self.shioaji.get_daily_pnl()
+                self.risk_mgr.update_daily_pnl(daily_pnl)
+                
+                # 6. 檢查是否需要強制停止
+                if not self.risk_mgr.is_trading_allowed():
+                    self.notifier.send_alert(
+                        "風控停止",
+                        f"單日虧損已達 {self.risk_mgr.max_daily_loss} 元，停止所有交易"
+                    )
+                
+            except Exception as e:
+                self.logger.error(f"主迴圈錯誤: {e}")
+                self.notifier.send_error(str(e))
+            
+            await asyncio.sleep(check_interval)
+    
+    async def _update_positions(self) -> None:
+        """更新部位價格"""
+        positions = self.position_mgr.get_all_positions()
+        
+        if not positions:
+            return
+        
+        price_map = {}
+        for pos in positions:
+            contract = self.shioaji.get_contract(pos.symbol)
+            if contract:
+                price_map[pos.symbol] = contract.last_price
+        
+        # 更新並檢查是否觸發停損止盈
+        triggered = self.position_mgr.update_prices(price_map)
+        
+        # 處理觸發
+        for t in triggered:
+            strategy_id = t["strategy_id"]
+            exit_price = t["exit_price"]
+            
+            # 平倉
+            result = self.position_mgr.close_position(strategy_id, exit_price)
+            
+            if result:
+                emoji = "🔴" if result["pnl"] < 0 else "🟢"
+                self.notifier.send_message(
+                    f"{emoji} *{'停損' if t['type'] == 'stop_loss' else '止盈'}*\n"
+                    f"策略: {result['strategy_name']}\n"
+                    f"平倉價: {exit_price}\n"
+                    f"損益: {result['pnl']:+,.0f}"
+                )
+    
+    async def _check_stop_loss_take_profit(self) -> None:
+        """檢查停損止盈"""
+        # 這個功能已經整合到 _update_positions 中
+        pass
+    
+    def get_help_text(self) -> str:
+        """取得說明文字"""
+        return """
+📋 *AI 期貨交易系統 - 命令列表*
+
+🔍 【查詢類】
+• status / 系統狀態 - 系統狀態
+• positions / 部位 - 目前部位
+• strategies / 策略 - 所有策略
+• performance / 績效 - 當日績效
+• risk / 風控 - 風控狀態
+• orders / 訂單 - 訂單歷史
+• price <代碼> - 查詢報價
+例: price TXF
+
+📦 【策略管理】
+• enable <ID> - 啟用策略
+例: enable strategy_001
+• disable <ID> - 停用策略 (有部位會詢問)
+例: disable strategy_001
+• confirm disable <ID> - 確認停用並平倉
+例: confirm disable strategy_001
+• 透過 AI Agent 建立/更新/刪除策略
+例: "建立策略 ID=my_rsi, 名稱=RSI策略, 代碼=TXF, 描述=RSI低於30買入"
+
+❓ 【其他】
+• help / ? - 顯示此列表
+• cancel - 取消操作
+"""
+    
+    def llm_process_command(self, command: str) -> str:
+        """透過 LLM 處理命令"""
+        import json
+        
+        # 取得 system prompt
+        system_prompt = get_system_prompt(self.config)
+        
+        # 建立 messages
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": command}
+        ]
+        
+        # 取得 tools 定義
+        tools = self.trading_tools.get_tool_definitions()
+        
+        try:
+            # 呼叫 LLM
+            response = asyncio.run(
+                self.llm_provider.chat_with_tools(
+                    messages=messages,
+                    tools=tools,
+                    temperature=0.7
+                )
+            )
+            
+            # 檢查是否有 tool calls
+            tool_calls = response.get("tool_calls", [])
+            
+            if tool_calls:
+                # 執行第一個 tool call
+                tool_call = tool_calls[0]
+                function_name = tool_call["function"]["name"]
+                arguments = json.loads(tool_call["function"]["arguments"])
+                
+                # 執行工具
+                result = self.trading_tools.execute_tool(function_name, arguments)
+                return result
+            else:
+                # 沒有 tool call，直接回覆
+                content = response.get("content", "")
+                return content if content else "無法理解指令，輸入 help 查看"
+                
+        except Exception as e:
+            self.logger.error(f"LLM 處理失敗: {e}")
+            # Fallback 到原有邏輯
+            return self.fallback_handle_command(command)
+    
+    def fallback_handle_command(self, command: str) -> str:
+        """Fallback 命令處理 (當 LLM 失敗時)"""
+        command = command.strip().lower()
+        
+        # 解析命令
+        if command in ["status", "狀態", "系統狀態"]:
+            return self.trading_tools.get_system_status()
+        
+        elif command in ["positions", "部位", "持倉"]:
+            return self.trading_tools.get_positions()
+        
+        elif command in ["strategies", "策略"]:
+            return self.trading_tools.get_strategies()
+        
+        elif command in ["performance", "績效"]:
+            return self.trading_tools.get_performance()
+        
+        elif command in ["risk", "風控"]:
+            return self.trading_tools.get_risk_status()
+        
+        elif command in ["orders", "訂單"]:
+            return self.trading_tools.get_order_history()
+        
+        elif command.startswith("enable "):
+            strategy_id = command.split(" ", 1)[1]
+            return self.trading_tools.enable_strategy(strategy_id)
+        
+        elif command.startswith("disable "):
+            strategy_id = command.split(" ", 1)[1]
+            return self.trading_tools.disable_strategy(strategy_id)
+        
+        elif command.startswith("confirm disable "):
+            strategy_id = command.split(" ", 1)[1]
+            return self.trading_tools.confirm_disable_strategy(strategy_id)
+        
+        elif command in ["cancel", "取消"]:
+            return "已取消操作"
+        
+        elif command.startswith("price "):
+            symbol = command.split(" ", 1)[1].upper()
+            return self.trading_tools.get_market_data(symbol)
+        
+        else:
+            return "無法理解指令，輸入 help 查看"
+
+
+async def main():
+    """主函數"""
+    # 建立系統
+    system = AITradingSystem()
+    
+    # 處理信號
+    def signal_handler(sig, frame):
+        print("\n收到停止信號，正在關閉...")
+        asyncio.create_task(system.stop())
+    
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
+    # 啟動
+    await system.start()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
