@@ -238,11 +238,12 @@ class TelegramBot:
         BotCommand("new", "開始新對話"),
     ]
 
-    def __init__(self, config: dict, command_handler):
+    def __init__(self, config: dict, command_handler, clear_history_callback=None):
         self.enabled = config.get("enabled", True)
         self.bot_token = config.get("bot_token", "")
         self.chat_id = config.get("chat_id", "")
         self.command_handler = command_handler
+        self.clear_history_callback = clear_history_callback
 
         self._app = None
         self._running = False
@@ -400,6 +401,9 @@ class TelegramBot:
         if not update.message:
             return
 
+        if self.clear_history_callback:
+            self.clear_history_callback()
+        
         await update.message.reply_text("🔄 已開始新對話，請輸入您的問題或指令。")
 
     async def _on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

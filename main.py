@@ -32,6 +32,10 @@ class AITradingSystem:
         
         self.logger = logger
         
+        # 對話歷史（用於 LLM 上下文）
+        self.conversation_history: list = []
+        self.max_history = 20  # 最多保存最近 20 條對話
+        
         # 初始化各模組
         workspace = get_workspace_dir()
         
@@ -70,7 +74,8 @@ class AITradingSystem:
         # Telegram Bot (接收命令)
         self.telegram_bot = TelegramBot(
             config=self.config.telegram.model_dump(),
-            command_handler=self.llm_process_command
+            command_handler=self.llm_process_command,
+            clear_history_callback=self.clear_conversation_history
         )
         
         # LLM Provider (lazy loading)
@@ -413,11 +418,16 @@ class AITradingSystem:
         # 取得 system prompt
         system_prompt = get_system_prompt(self.config)
         
-        # 建立 messages
+        # 建立 messages（包含對話歷史）
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": command}
         ]
+        
+        # 添加對話歷史
+        messages.extend(self.conversation_history)
+        
+        # 添加當前用戶訊息
+        messages.append({"role": "user", "content": command})
         
         # 取得 tools 定義
         tools = self.trading_tools.get_tool_definitions()
@@ -430,6 +440,9 @@ class AITradingSystem:
                 temperature=0.7
             )
             
+            # 獲取 LLM 回覆內容
+            content = response.get("content", "")
+            
             # 檢查是否有 tool calls
             tool_calls = response.get("tool_calls", [])
             
@@ -441,16 +454,36 @@ class AITradingSystem:
                 
                 # 執行工具
                 result = self.trading_tools.execute_tool(function_name, arguments)
+                
+                # 添加到歷史
+                self._add_to_history(command, result)
                 return result
             else:
                 # 沒有 tool call，直接回覆
-                content = response.get("content", "")
-                return content if content else "無法理解指令，輸入 help 查看"
+                result = content if content else "無法理解指令，輸入 help 查看"
+                
+                # 添加到歷史
+                self._add_to_history(command, result)
+                return result
                 
         except Exception as e:
             self.logger.error(f"LLM 處理失敗: {e}")
             # Fallback 到原有邏輯
             return self.fallback_handle_command(command)
+    
+    def _add_to_history(self, user_message: str, assistant_message: str) -> None:
+        """添加對話到歷史記錄"""
+        self.conversation_history.append({"role": "user", "content": user_message})
+        self.conversation_history.append({"role": "assistant", "content": assistant_message})
+        
+        # 限制歷史長度
+        if len(self.conversation_history) > self.max_history * 2:
+            self.conversation_history = self.conversation_history[-self.max_history:]
+    
+    def clear_conversation_history(self) -> None:
+        """清除對話歷史"""
+        self.conversation_history = []
+        self.logger.info("對話歷史已清除")
     
     def fallback_handle_command(self, command: str) -> str:
         """Fallback 命令處理 (當 LLM 失敗時)"""
