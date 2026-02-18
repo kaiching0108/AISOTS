@@ -421,7 +421,7 @@ class AITradingSystem:
 • cancel - 取消操作
 """
     
-    def llm_process_command(self, command: str) -> str:
+    async def llm_process_command(self, command: str) -> str:
         """透過 LLM 處理命令"""
         import json
         
@@ -439,12 +439,10 @@ class AITradingSystem:
         
         try:
             # 呼叫 LLM
-            response = asyncio.run(
-                self.llm_provider.chat_with_tools(
-                    messages=messages,
-                    tools=tools,
-                    temperature=0.7
-                )
+            response = await self.llm_provider.chat_with_tools(
+                messages=messages,
+                tools=tools,
+                temperature=0.7
             )
             
             # 檢查是否有 tool calls
@@ -618,7 +616,7 @@ async def main():
                     if command.lower() in ["exit", "quit", "q", "離開"]:
                         break
                     if command and hasattr(system, 'llm_process_command'):
-                        result = system.llm_process_command(command)
+                        result = asyncio.run(system.llm_process_command(command))
                         print(result)
                 except (KeyboardInterrupt, EOFError):
                     break

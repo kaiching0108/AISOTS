@@ -422,7 +422,7 @@ class TelegramBot:
         logger.info(f"收到命令: {user_text}")
 
         try:
-            result = self.command_handler(user_text)
+            result = await self.command_handler(user_text)
             await message.reply_text(result, parse_mode="Markdown")
         except Exception as e:
             logger.error(f"處理命令失敗: {e}")
