@@ -318,7 +318,25 @@ Example flow:
 1. User: "幫我設計一個每日賺500元的策略"
 2. System asks for futures code (if not provided)
 3. User confirms → Strategy created with auto-generated ID like `MXFA01`
-4. User enables → Old MXF strategies auto-disabled
+4. User enables → Old MXF strategies auto-disabled → System auto-starts → Strategy code generated
+
+#### Strategy States
+
+The system uses two state properties:
+
+| State | Property | Description |
+|-------|----------|-------------|
+| Enabled | `enabled` | User-level switch (on/off) |
+| Running | `is_running` | System execution state |
+
+- **`enabled`**: Set to `True` when user enables the strategy via `enable <ID>`
+- **`is_running`**: Set to `True` when the system actually starts executing the strategy (generates code, subscribes to market data, begins trading)
+
+When a strategy is enabled but not yet running, the main loop (`run_all_strategies()`) will automatically call `start_strategy()` to:
+1. Set `is_running = True`
+2. Generate strategy code via LLM
+3. Subscribe to market quotes
+4. Begin executing trades
 
 #### Versioning
 
