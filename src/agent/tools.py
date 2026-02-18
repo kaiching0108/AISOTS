@@ -653,8 +653,8 @@ ID: {strategy_id}
             goal_text = f"目標: {unit_names.get(unit, unit)}賺 {params['goal']:,} 元\n"
         
         result = f"""
-✅ *策略已建立*
-───────────────
+✅ *策略已建立（停用中）*
+─────────────────────
 ID: {strategy_id}
 名稱: {params['name']}
 期貨代碼: {params['symbol']}
@@ -664,7 +664,9 @@ K線週期: {params['timeframe']}
 停損: {params['stop_loss']}點
 止盈: {params['take_profit']}點
 {goal_text}
-請使用 `enable {strategy_id}` 啟用策略
+─────────────────────
+⚠️ 策略已建立但尚未啟用！
+請說「啟用 {strategy_id}」開始交易
 """
         
         self._clear_pending()

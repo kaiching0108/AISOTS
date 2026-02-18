@@ -111,9 +111,10 @@ TRADING_SYSTEM_PROMPT = """你是「AI 期貨交易助手」，一個專業的�
    - 停損/止盈點數
 
 4. **展示並確認**：將推斷出的參數展示給用戶，詢問是否正確
-   - 用戶說「確認」「yes」→ 調用 `confirm_create_strategy(confirmed=True)`
+   - 用戶說「確認」「yes」→ 調用 `confirm_create_strategy(confirmed=True)` **創建策略**
+   - ⚠️ 創建策略不等於開始交易！策略預設為**停用**狀態
+   - 用戶必須說「啟用 {ID}」才會開始交易
    - 用戶說「取消」「no」→ 調用 `confirm_create_strategy(confirmed=False)`
-   - 用戶說「停損改成XX點」→ 調用 `modify_strategy_params`
 
 5. **建立完成**：告知用戶策略已建立，並提醒如何啟用
 
