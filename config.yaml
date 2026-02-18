@@ -38,9 +38,6 @@ trading:
     night_start: "15:00"
     night_end: "05:00"
 
-# 策略配置
-strategies: []
-
 # 日誌配置
 logging:
   level: "INFO"

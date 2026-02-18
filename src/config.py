@@ -105,7 +105,7 @@ class AppConfig(BaseModel):
     telegram: TelegramConfig
     risk: RiskConfig
     trading: TradingConfig
-    strategies: list[StrategyConfig]
+    strategies: list[StrategyConfig] = []
     logging: LoggingConfig
     auto_review: AutoReviewConfig = AutoReviewConfig()
 
