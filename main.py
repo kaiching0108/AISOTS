@@ -2,6 +2,7 @@
 import asyncio
 import logging
 import sys
+import argparse
 from pathlib import Path
 from datetime import datetime, time
 import signal
@@ -41,7 +42,8 @@ class AITradingSystem:
         self.shioaji = ShioajiClient(
             api_key=self.config.shioaji.api_key,
             secret_key=self.config.shioaji.secret_key,
-            simulation=self.config.shioaji.simulation
+            simulation=self.config.shioaji.simulation,
+            skip_login=getattr(self.config.shioaji, 'skip_login', False)
         )
         
         # 連線管理
@@ -566,10 +568,26 @@ class AITradingSystem:
             return "無法理解指令，輸入 help 查看"
 
 
+def parse_args():
+    """解析命令行參數"""
+    parser = argparse.ArgumentParser(description="AI 期貨交易系統")
+    parser.add_argument("command", nargs="?", default="start", help="命令: start (預設)")
+    parser.add_argument("--simulate", action="store_true", help="模擬模式（跳過 API 登入）")
+    parser.add_argument("--cli", action="store_true", help="啟用本地命令行界面")
+    parser.add_argument("--config", default="config.yaml", help="配置文件路徑")
+    return parser.parse_args()
+
+
 async def main():
     """主函數"""
+    args = parse_args()
+    
     # 建立系統
-    system = AITradingSystem()
+    system = AITradingSystem(config_path=args.config)
+    
+    # 模擬模式
+    if args.simulate:
+        system.shioaji.skip_login = True
     
     # 處理信號
     def signal_handler(sig, frame):
@@ -580,7 +598,49 @@ async def main():
     signal.signal(signal.SIGTERM, signal_handler)
     
     # 啟動
-    await system.start()
+    if not await system.initialize():
+        print("系統初始化失敗")
+        return
+    
+    # CLI 模式
+    if args.cli:
+        import threading
+        
+        print("\n" + "=" * 50)
+        print("本地命令行界面已啟動")
+        print("輸入指令操作系統，輸入 exit 或 quit 離開")
+        print("=" * 50)
+        
+        def local_cli():
+            while system.is_running:
+                try:
+                    command = input("\n> ").strip()
+                    if command.lower() in ["exit", "quit", "q", "離開"]:
+                        break
+                    if command and hasattr(system, 'llm_process_command'):
+                        result = system.llm_process_command(command)
+                        print(result)
+                except (KeyboardInterrupt, EOFError):
+                    break
+                except Exception as e:
+                    print(f"命令執行錯誤: {e}")
+        
+        cli_thread = threading.Thread(target=local_cli, daemon=True)
+        cli_thread.start()
+        cli_thread.join()
+    else:
+        # Telegram 模式
+        system.is_running = True
+        await system.telegram_bot.start()
+        system.main_loop_task = asyncio.create_task(system._main_loop())
+        
+        try:
+            await system.main_loop_task
+        except asyncio.CancelledError:
+            pass
+    
+    # 停止系統
+    await system.stop()
 
 
 if __name__ == "__main__":

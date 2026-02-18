@@ -11,19 +11,32 @@ logger = logging.getLogger(__name__)
 class ShioajiClient:
     """Shioaji API 客戶端封裝"""
     
-    def __init__(self, api_key: str, secret_key: str, simulation: bool = True):
+    def __init__(self, api_key: str, secret_key: str, simulation: bool = True, skip_login: bool = False):
         self.api_key = api_key
         self.secret_key = secret_key
         self.simulation = simulation
+        self.skip_login = skip_login
         self.api = sj.Shioaji(simulation=simulation)
         self.futopt_account = None
         self.connected = False
         
         # 合約快取
         self._contracts_cache: Dict[str, Any] = {}
+        
+        # 模擬資料
+        self._mock_positions: List[Dict[str, Any]] = []
+        self._mock_orders: List[Dict[str, Any]] = []
+        self._order_id_counter = 1000
     
     def login(self) -> bool:
         """登入 Shioaji"""
+        # 跳過登入（模擬模式）
+        if self.skip_login:
+            logger.info("模擬模式：跳過 API 登入")
+            self.connected = True
+            self.futopt_account = "SIMULATE_ACCOUNT"
+            return True
+        
         try:
             logger.info("正在登入 Shioaji...")
             accounts = self.api.login(
@@ -114,6 +127,56 @@ class ShioajiClient:
             logger.error("未連線，無法下單")
             return None
         
+        # 離線模式：模擬下單
+        if self.skip_login:
+            order_id = f"OFFLINE_{self._order_id_counter}"
+            self._order_id_counter += 1
+            
+            mock_trade = type('MockTrade', (), {
+                'order_id': order_id,
+                'status': 'F',
+                'action': action,
+                'symbol': symbol,
+                'quantity': quantity,
+                'price': price,
+                'filled_price': price if price > 0 else 18500,
+                'filled_quantity': quantity,
+                'order_type': order_type,
+                'price_type': price_type,
+            })()
+            
+            self._mock_orders.append({
+                'order_id': order_id,
+                'action': action,
+                'symbol': symbol,
+                'quantity': quantity,
+                'price': price,
+                'filled_price': mock_trade.filled_price,
+                'status': 'filled',
+                'timestamp': datetime.now().isoformat()
+            })
+            
+            # 模擬部位
+            existing = next((p for p in self._mock_positions if p['symbol'] == symbol), None)
+            if action == "Buy":
+                if existing:
+                    existing['quantity'] += quantity
+                else:
+                    self._mock_positions.append({
+                        'symbol': symbol,
+                        'quantity': quantity,
+                        'avg_price': mock_trade.filled_price,
+                        'action': 'Long'
+                    })
+            else:  # Sell
+                if existing:
+                    existing['quantity'] -= quantity
+                    if existing['quantity'] <= 0:
+                        self._mock_positions.remove(existing)
+            
+            logger.info(f"離線模擬下單: {symbol} {action} {quantity} @ {mock_trade.filled_price}")
+            return mock_trade
+        
         contract = self.get_contract(symbol)
         if not contract:
             logger.error(f"找不到合約: {symbol}")
@@ -151,6 +214,11 @@ class ShioajiClient:
             logger.error("未連線，無法取消")
             return False
         
+        # 離線模式：模擬取消
+        if self.skip_login:
+            logger.info(f"離線模擬取消訂單")
+            return True
+        
         try:
             self.api.cancel_order(trade)
             logger.info(f"取消訂單成功")
@@ -164,6 +232,10 @@ class ShioajiClient:
         if not self.connected:
             return []
         
+        # 離線模式：返回模擬部位
+        if self.skip_login:
+            return self._mock_positions
+        
         try:
             positions = self.api.list_positions(self.futopt_account)
             return positions
@@ -175,6 +247,14 @@ class ShioajiClient:
         """取得已實現損益"""
         if not self.connected:
             return []
+        
+        # 離線模式：返回模擬損益
+        if self.skip_login:
+            mock_pnl = []
+            for order in self._mock_orders:
+                if order.get('status') == 'filled' and order.get('pnl') is not None:
+                    mock_pnl.append(order)
+            return mock_pnl
         
         try:
             if not begin_date:

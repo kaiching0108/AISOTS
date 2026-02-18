@@ -285,34 +285,42 @@ class TelegramBot:
             )
         )
 
-        await self._app.initialize()
-        await self._app.start()
-
-        bot_info = await self._app.bot.get_me()
-        logger.info(f"Telegram Bot @{bot_info.username} 已連線")
-
         try:
-            await self._app.bot.set_my_commands(self.BOT_COMMANDS)
-            logger.info("Telegram Bot 命令已註冊")
+            await self._app.initialize()
+            await self._app.start()
+            
+            bot_info = await self._app.bot.get_me()
+            logger.info(f"Telegram Bot @{bot_info.username} 已連線")
+            
+            try:
+                await self._app.bot.set_my_commands(self.BOT_COMMANDS)
+                logger.info("Telegram Bot 命令已註冊")
+            except Exception as e:
+                logger.warning(f"註冊 Bot 命令失敗: {e}")
+
+            self._running = True
+            await self._app.updater.start_polling(
+                allowed_updates=["message"],
+                drop_pending_updates=True
+            )
+            
+            logger.info("Telegram Bot 已啟動 (Polling 模式)")
         except Exception as e:
-            logger.warning(f"註冊 Bot 命令失敗: {e}")
-
-        self._running = True
-        await self._app.updater.start_polling(
-            allowed_updates=["message"],
-            drop_pending_updates=True
-        )
-
-        logger.info("Telegram Bot 已啟動 (Polling 模式)")
+            logger.warning(f"Telegram Bot 啟動失敗: {e}")
+            self._running = False
+            self._app = None
 
     async def stop(self) -> None:
         """停止 Telegram Bot"""
         self._running = False
-        if self._app:
+        if self._app and self._app.updater:
             logger.info("正在停止 Telegram Bot...")
-            await self._app.updater.stop()
-            await self._app.stop()
-            await self._app.shutdown()
+            try:
+                await self._app.updater.stop()
+                await self._app.stop()
+                await self._app.shutdown()
+            except Exception as e:
+                logger.warning(f"停止 Telegram Bot 時發生錯誤: {e}")
             self._app = None
 
     async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

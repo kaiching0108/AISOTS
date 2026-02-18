@@ -9,6 +9,7 @@ class ShioajiConfig(BaseModel):
     api_key: str
     secret_key: str
     simulation: bool = True
+    offline_mode: bool = False
 
 
 class LLMConfig(BaseModel):
