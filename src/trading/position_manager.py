@@ -20,7 +20,7 @@ class PositionManager:
     
     def _load_positions(self) -> None:
         """載入部位"""
-        positions_data = self.store.get_all()
+        positions_data = self.store.get_all_positions()
         
         for data in positions_data:
             if data.get("quantity", 0) > 0:  # 只載入有部位的

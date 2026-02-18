@@ -20,7 +20,7 @@ class StrategyManager:
     
     def _load_strategies(self) -> None:
         """載入所有策略"""
-        strategies_data = self.store.get_all()
+        strategies_data = self.store.get_all_strategies()
         
         for data in strategies_data:
             strategy = Strategy.from_dict(data)
