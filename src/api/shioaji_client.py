@@ -123,7 +123,7 @@ class ShioajiClient:
             logger.warning(f"取得期貨代碼失敗: {e}")
         
         if not symbols:
-            symbols = ["TXF", "MXF", "EFF", "T5F", "XIF"]
+            symbols = ["TXF", "MXF", "TMF", "T5F", "XIF", "TE"]
             logger.warning(f"使用預設期貨代碼: {symbols}")
         
         return symbols
@@ -148,10 +148,11 @@ class ShioajiClient:
         if not result:
             result = {
                 "TXF": "臺股期貨",
-                "MXF": "微型臺指期貨",
-                "EFF": "電子期貨",
-                "T5F": "微型電子期貨",
-                "XIF": "小型電子期貨"
+                "MXF": "小型臺指",
+                "TMF": "微型臺指期貨",
+                "T5F": "臺灣50期貨",
+                "XIF": "非金電期貨",
+                "TE": "電子期貨"
             }
             logger.warning(f"使用預設期貨代碼對應表: {result}")
         

@@ -35,7 +35,7 @@ class TradingTools:
         if valid_symbols:
             self._valid_symbols = valid_symbols
         else:
-            self._valid_symbols = ["TXF", "MXF", "EFF", "T5F", "XIF"]
+            self._valid_symbols = ["TXF", "MXF", "TMF", "T5F", "XIF", "TE"]
         
         # 期貨代碼與中文名稱對應表
         self._futures_names: Dict[str, str] = {}
@@ -87,10 +87,11 @@ class TradingTools:
                 logger.warning(f"取得期貨代碼對應表失敗: {e}")
                 self._futures_names = {
                     "TXF": "臺股期貨",
-                    "MXF": "微型臺指期貨",
-                    "EFF": "電子期貨",
-                    "T5F": "微型電子期貨",
-                    "XIF": "小型電子期貨"
+                    "MXF": "小型臺指",
+                    "TMF": "微型臺指期貨",
+                    "T5F": "臺灣50期貨",
+                    "XIF": "非金電期貨",
+                    "TE": "電子期貨"
                 }
     
     def get_futures_name(self, symbol: str) -> str:
