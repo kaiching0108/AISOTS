@@ -551,7 +551,9 @@ ID: {strategy_id}
     
     def confirm_create_strategy(self, confirmed: bool) -> str:
         """確認或取消建立策略"""
-        if not self._pending_strategy or not self._awaiting_confirm:
+        logger.info(f"confirm_create_strategy: confirmed={confirmed}, pending={self._pending_strategy is not None}, awaiting={self._awaiting_confirm}")
+        
+        if not self._pending_strategy:
             self._clear_pending()
             return "❌ 沒有待確認的策略，請先說「幫我建立策略」"
         
@@ -559,6 +561,8 @@ ID: {strategy_id}
             self._clear_pending()
             return "❌ 已取消建立策略"
         
+        # 確保處於確認狀態
+        self._awaiting_confirm = True
         params = self._pending_strategy
         
         # 使用新的 ID 生成系統

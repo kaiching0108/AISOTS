@@ -539,6 +539,18 @@ class AITradingSystem:
         elif command in ["cancel", "取消"]:
             return "已取消操作"
         
+        elif command in ["確認", "确定", "yes", "確定"]:
+            # 確認建立策略
+            if self.trading_tools._pending_strategy:
+                return self.trading_tools.confirm_create_strategy(confirmed=True)
+            return "沒有待確認的策略"
+        
+        elif command in ["否", "no", "不要"]:
+            # 取消建立策略
+            if self.trading_tools._pending_strategy:
+                return self.trading_tools.confirm_create_strategy(confirmed=False)
+            return "沒有待取消的操作"
+        
         elif command.startswith("price "):
             symbol = command.split(" ", 1)[1].upper()
             return self.trading_tools.get_market_data(symbol)
