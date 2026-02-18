@@ -38,54 +38,8 @@ trading:
     night_start: "15:00"
     night_end: "05:00"
 
-# 策略配置 - 3個策略
-strategies:
-  - id: "strategy_001"
-    name: "台指突破策略"
-    symbol: "TXF"              # 期貨代碼
-    goal: 500                  # 目標：每日賺 500 元
-    goal_unit: "daily"         # 目標單位: daily/weekly/monthly/quarterly/yearly
-    prompt: |
-      當台指期貨15分K突破當日高點時買進，
-      跌破當日低點時賣出。
-      停損50點，止盈100點。
-    enabled: true
-    params:
-      timeframe: "15m"
-      stop_loss: 50
-      take_profit: 100
-      position_size: 2
-
-  - id: "strategy_002"
-    name: "小台均值回歸"
-    symbol: "MXF"
-    goal: 3000                 # 目標：每週賺 3000 元
-    goal_unit: "weekly"
-    prompt: |
-      當小台指價格偏離均線2%以上時順勢進場，
-      價格回到均線時平倉。
-      停損30點，止盈60點。
-    enabled: true
-    params:
-      timeframe: "5m"
-      stop_loss: 30
-      take_profit: 60
-      position_size: 1
-
-  - id: "strategy_003"
-    name: "電子期動量"
-    symbol: "EFF"
-    # 沒有 goal 欄位表示沒有設定目標
-    prompt: |
-      電子期1小時動量策略，
-      連續3根陽線且成交量放大時買進。
-      停損80點，止盈150點。
-    enabled: false
-    params:
-      timeframe: "1h"
-      stop_loss: 80
-      take_profit: 150
-      position_size: 1
+# 策略配置
+strategies: []
 
 # 日誌配置
 logging:
