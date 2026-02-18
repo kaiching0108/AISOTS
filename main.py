@@ -164,6 +164,9 @@ class AITradingSystem:
             self.logger.error("Shioaji 登入失敗")
             return False
         
+        # 從 Shioaji 取得可用期貨代碼
+        self.trading_tools.update_valid_symbols()
+        
         # 設置連線事件處理
         self.connection_mgr.setup_event_handlers()
         

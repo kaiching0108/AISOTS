@@ -109,6 +109,25 @@ class ShioajiClient:
             logger.error(f"取得合約列表失敗 {category}: {e}")
             return []
     
+    def get_available_futures_symbols(self) -> List[str]:
+        """取得所有可用的期貨代碼"""
+        symbols = []
+        try:
+            futures = self.api.Contracts.Futures
+            if futures:
+                for attr in dir(futures):
+                    if not attr.startswith('_') and not attr.isupper():
+                        symbols.append(attr)
+                logger.info(f"從 Shioaji 取得可用期貨代碼: {symbols}")
+        except Exception as e:
+            logger.warning(f"取得期貨代碼失敗: {e}")
+        
+        if not symbols:
+            symbols = ["TXF", "MXF", "EFF", "T5F", "XIF"]
+            logger.warning(f"使用預設期貨代碼: {symbols}")
+        
+        return symbols
+    
     def place_order(
         self,
         symbol: str,

@@ -20,7 +20,8 @@ class TradingTools:
         risk_manager: RiskManager,
         shioaji_client,
         notifier,
-        llm_provider=None
+        llm_provider=None,
+        valid_symbols: list = None
     ):
         self.strategy_mgr = strategy_manager
         self.position_mgr = position_manager
@@ -29,6 +30,12 @@ class TradingTools:
         self.api = shioaji_client
         self.notifier = notifier
         self._llm_provider = llm_provider
+        
+        # 從 Shioaji 取得可用期貨代碼，若無則使用預設列表
+        if valid_symbols:
+            self._valid_symbols = valid_symbols
+        else:
+            self._valid_symbols = ["TXF", "MXF", "EFF", "T5F", "XIF"]
         
         self._pending_strategy: Optional[Dict[str, Any]] = None
         self._awaiting_symbol: bool = False
@@ -54,6 +61,19 @@ class TradingTools:
             from src.analysis.performance_analyzer import PerformanceAnalyzer
             self._performance_analyzer = PerformanceAnalyzer(self._get_signal_recorder())
         return self._performance_analyzer
+    
+    def update_valid_symbols(self, symbols: list = None) -> None:
+        """更新可用期貨代碼列表"""
+        if symbols:
+            self._valid_symbols = symbols
+            logger.info(f"已更新可用期貨代碼: {symbols}")
+        elif self.api:
+            try:
+                symbols = self.api.get_available_futures_symbols()
+                self._valid_symbols = symbols
+                logger.info(f"已從 Shioaji 取得可用期貨代碼: {symbols}")
+            except Exception as e:
+                logger.warning(f"從 Shioaji 取得期貨代碼失敗: {e}")
     
     # ========== 策略工具 ==========
     
@@ -378,9 +398,8 @@ ID: {strategy_id}
         
         symbol = symbol.upper().strip()
         
-        valid_symbols = ["TXF", "MXF", "EFF", "T5F", "XIF"]
-        if symbol not in valid_symbols:
-            return f"❌ 無效的期貨代碼：{symbol}，請輸入有效的代碼（如 TXF、MXF、EFF）"
+        if symbol not in self._valid_symbols:
+            return f"❌ 無效的期貨代碼：{symbol}，請輸入有效的代碼（如 {', '.join(self._valid_symbols)}）"
         
         self._awaiting_symbol = False
         self._awaiting_confirm = True
@@ -519,12 +538,11 @@ ID: {strategy_id}
         
         if "期貨代碼" in modifications and "改成" in modifications:
             new_symbol = modifications.split("改成")[1].strip().upper()
-            valid_symbols = ["TXF", "MXF", "EFF", "T5F", "XIF"]
-            if new_symbol in valid_symbols:
+            if new_symbol in self._valid_symbols:
                 params["symbol"] = new_symbol
                 modified = True
             else:
-                return f"❌ 無效的期貨代碼，請使用 {', '.join(valid_symbols)}"
+                return f"❌ 無效的期貨代碼，請使用 {', '.join(self._valid_symbols)}"
         
         if not modified:
             return "❌ 無法解析修改內容，請使用格式如「停損改成50點」或「止盈改成100點」"
