@@ -63,7 +63,7 @@ class AITradingSystem:
         self.order_mgr = OrderManager(workspace)
         
         # 風控管理
-        self.risk_mgr = RiskManager(self.config.risk.dict())
+        self.risk_mgr = RiskManager(self.config.risk.model_dump())
         
         # 通知
         self.notifier = TelegramNotifier(self.config.telegram.model_dump())
@@ -73,6 +73,9 @@ class AITradingSystem:
             config=self.config.telegram.model_dump(),
             command_handler=self.llm_process_command
         )
+        
+        # LLM Provider (lazy loading)
+        self._llm_provider = None
         
         # AI 交易工具
         self.trading_tools = TradingTools(
@@ -96,10 +99,7 @@ class AITradingSystem:
             notifier=self.notifier,
             on_signal=self._on_strategy_signal
         )
-        
-        # LLM Provider (lazy loading)
-        self._llm_provider = None
-        
+
         # 系統狀態
         self.is_running = False
         self.main_loop_task = None

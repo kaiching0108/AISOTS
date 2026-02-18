@@ -420,6 +420,6 @@ class ProviderFactory:
         return list(cls._providers.keys())
 
 
-async def create_llm_provider(config) -> BaseProvider:
+def create_llm_provider(config) -> BaseProvider:
     """建立 LLM Provider 的便捷函數"""
     return ProviderFactory.create(config)
