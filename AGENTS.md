@@ -15,11 +15,12 @@ ai_futures_trading/
 │   ├── api/              # Shioaji API wrappers
 │   ├── trading/          # Trading logic (strategies, positions, orders)
 │   ├── engine/           # Strategy execution engine (LLM generator, rule engine)
+│   ├── analysis/          # Performance analysis (signal recorder, analyzer, strategy reviewer)
 │   ├── market/           # Market data services
 │   ├── risk/             # Risk management
 │   ├── storage/          # JSON data persistence
 │   ├── agent/            # AI agent tools and LLM providers
-│   └── notify/           # Telegram notifications
+│   └── notify/           # Telegram notifications & bot
 ├── tests/                 # Test files
 ├── workspace/            # Runtime data (JSON files)
 └── documents/            # Documentation
@@ -275,16 +276,160 @@ class MyStrategy(TradingStrategy):
 
 The system uses JSON files for persistence in `workspace/`:
 
-- `strategies.json` - Strategy configurations (including LLM-generated code)
-- `positions.json` - Position tracking
-- `orders.json` - Order history
-- `performance.json` - Performance data
+| File | Description |
+|------|-------------|
+| `strategies.json` | Strategy configurations (including LLM-generated code) |
+| `positions.json` | Position tracking |
+| `orders.json` | Order history |
+| `signals.json` | Signal records for performance analysis |
+| `performance.json` | Performance data |
 
 Use `JSONStore` from `src/storage/json_store.py` for custom storage.
 
 ---
 
-## Testing Guidelines
+## Analysis Module
+
+### Overview
+
+The system includes an `analysis` module for performance tracking and strategy optimization:
+
+```
+src/analysis/
+├── __init__.py
+├── signal_recorder.py       # Records trading signals
+├── performance_analyzer.py  # Analyzes strategy performance
+└── strategy_reviewer.py    # LLM-based strategy review
+```
+
+### Signal Recording
+
+Use `SignalRecorder` to record trading signals:
+
+```python
+from src.analysis.signal_recorder import SignalRecorder
+from pathlib import Path
+
+recorder = SignalRecorder(Path("workspace"))
+
+# Record a signal
+signal_id = recorder.record_signal(
+    strategy_id="strategy_001",
+    signal="buy",
+    price=18500,
+    indicators={"rsi": 28.5, "macd": "golden_cross"}
+)
+
+# Update result when position is closed
+recorder.update_result(
+    signal_id=signal_id,
+    status="filled",
+    exit_price=18600,
+    exit_reason="take_profit",
+    pnl=6000
+)
+```
+
+### Performance Analysis
+
+Use `PerformanceAnalyzer` to analyze strategy performance:
+
+```python
+from src.analysis.performance_analyzer import PerformanceAnalyzer
+
+analyzer = PerformanceAnalyzer(recorder)
+
+# Get performance report
+report = analyzer.format_performance_report("strategy_001", "month")
+
+# Check if goal is achieved
+achieved = analyzer.check_goal_achieved(
+    goal=500,
+    goal_unit="daily",
+    period_profit=15000,
+    period_days=30
+)
+```
+
+### Strategy Review (LLM)
+
+Use `StrategyReviewer` for AI-powered strategy analysis:
+
+```python
+from src.analysis.strategy_reviewer import StrategyReviewer
+
+reviewer = StrategyReviewer(llm_provider, analyzer)
+
+# Get LLM review
+review = reviewer.review("strategy_001", strategy_info)
+```
+
+### Strategy Optimization
+
+Use `TradingTools` for self-optimizing strategies:
+
+```python
+# Set a goal for the strategy
+tools.set_strategy_goal("strategy_001", goal=500, goal_unit="daily")
+
+# Run optimization - checks goal achievement and triggers LLM review if needed
+result = tools.optimize_strategy("strategy_001")
+
+# Confirm optimization changes
+result = tools.confirm_optimize(confirmed=True)
+```
+
+The optimization flow:
+1. User sets a numeric goal (goal + goal_unit)
+2. Strategy executes and records signals
+3. Performance analyzer tracks results
+4. If goal not achieved → LLM reviewer analyzes and suggests improvements
+5. User confirms changes → strategy is updated with new parameters
+
+### Auto Review Scheduler
+
+Use `AutoReviewScheduler` for automated periodic strategy reviews:
+
+```python
+from src.analysis.auto_review_scheduler import AutoReviewScheduler
+
+# Initialize scheduler (typically done in main.py)
+scheduler = AutoReviewScheduler(
+    config=app_config,
+    trading_tools=trading_tools,
+    notifier=telegram_notifier
+)
+
+# Check and trigger reviews (called in main loop)
+scheduler.check_and_trigger()
+
+# Get scheduler status
+status = scheduler.get_status()
+```
+
+Configuration in `config.yaml`:
+
+```yaml
+auto_review:
+  enabled: true
+  schedules:
+    - strategy_id: "strategy_001"
+      period: 5
+      unit: "day"      # Trigger every 5 days
+    - strategy_id: "strategy_002"
+      period: 2
+      unit: "week"     # Trigger every 2 weeks
+```
+
+**Rules**:
+- Maximum 1 trigger per strategy per day (scheduled triggers only)
+- Manual `review <ID>` commands are not limited
+- Strategies without goal are skipped
+- Long messages are automatically split for Telegram
+
+---
+
+## New Tool Patterns
 
 - Place tests in `tests/` directory
 - Name test files as `test_<module>.py`
@@ -337,3 +482,53 @@ self.ta('RSI', period=14)
 self.ta('MACD', fast=12, slow=26, signal=9)
 self.ta('BB', period=20, std=2.0)
 ```
+
+### Telegram Bot
+
+The system includes a Telegram bot for receiving user commands:
+
+```python
+from src.notify import TelegramBot
+
+# Initialize with config and command handler
+bot = TelegramBot(
+    config={"bot_token": "...", "chat_id": "..."},
+    command_handler=llm_process_command
+)
+
+# Start bot
+await bot.start()
+
+# Stop bot
+await bot.stop()
+```
+
+The bot supports commands: `/start`, `/help`, `/new`, and text messages forwarded to the LLM.
+
+### Goal-Driven Strategy Creation
+
+The system supports two ways to create strategies:
+
+1. **Manual parameters**: Provide all parameters explicitly
+2. **Goal-driven**: User provides a goal (e.g., "make 500 yuan per day"), LLM infers parameters
+
+```python
+# Goal-driven creation flow
+# 1. User: "design a strategy that makes 500 yuan per day"
+# 2. LLM asks for symbol if not provided
+# 3. LLM infers parameters and shows for confirmation
+# 4. User can modify parameters
+# 5. User confirms → strategy created
+```
+
+### Self-Optimizing System
+
+The system supports a self-optimizing loop:
+
+1. User sets a numeric goal (e.g., goal: 500, goal_unit: "daily")
+2. Strategy executes and records signals
+3. Performance analyzer tracks results
+4. LLM reviewer analyzes and suggests improvements
+5. User confirms changes → strategy updated
+
+This enables continuous strategy optimization based on performance data.

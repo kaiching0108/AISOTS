@@ -9,7 +9,8 @@ class Strategy:
     """策略類別"""
     
     def __init__(self, strategy_id: str, name: str, symbol: str, prompt: str, 
-                 params: Dict[str, Any], enabled: bool = False):
+                 params: Dict[str, Any], enabled: bool = False,
+                 goal: Optional[float] = None, goal_unit: str = "daily"):
         self.id = strategy_id
         self.name = name
         self.symbol = symbol
@@ -17,6 +18,10 @@ class Strategy:
         self.params = params
         self.enabled = enabled
         self.created_at = datetime.now().isoformat()
+        
+        # 目標設定
+        self.goal: Optional[float] = goal
+        self.goal_unit: Optional[str] = goal_unit
         
         # 執行狀態
         self.last_signal: Optional[str] = None
@@ -44,6 +49,8 @@ class Strategy:
             "enabled": self.enabled,
             "params": self.params,
             "created_at": self.created_at,
+            "goal": self.goal,
+            "goal_unit": self.goal_unit,
             "last_signal": self.last_signal,
             "last_signal_time": self.last_signal_time,
             "rules": self.rules,
@@ -64,9 +71,13 @@ class Strategy:
             symbol=data.get("symbol", ""),
             prompt=data.get("prompt", ""),
             params=data.get("params", {}),
-            enabled=data.get("enabled", False)
+            enabled=data.get("enabled", False),
+            goal=data.get("goal"),
+            goal_unit=data.get("goal_unit", "daily")
         )
         strategy.created_at = data.get("created_at", strategy.created_at)
+        strategy.goal = data.get("goal")
+        strategy.goal_unit = data.get("goal_unit", "daily")
         strategy.last_signal = data.get("last_signal")
         strategy.last_signal_time = data.get("last_signal_time")
         strategy.rules = data.get("rules")

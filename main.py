@@ -13,7 +13,7 @@ from src.config import load_config, ensure_workspace, get_workspace_dir
 from src.api import ShioajiClient, ConnectionManager, OrderCallbackHandler
 from src.trading import StrategyManager, PositionManager, OrderManager
 from src.risk import RiskManager
-from src.notify import TelegramNotifier
+from src.notify import TelegramNotifier, TelegramBot
 from src.agent import TradingTools, get_system_prompt
 from src.agent.providers import create_llm_provider
 from src.engine import StrategyRunner
@@ -68,6 +68,12 @@ class AITradingSystem:
         # 通知
         self.notifier = TelegramNotifier(self.config.telegram.model_dump())
         
+        # Telegram Bot (接收命令)
+        self.telegram_bot = TelegramBot(
+            config=self.config.telegram.model_dump(),
+            command_handler=self.llm_process_command
+        )
+        
         # AI 交易工具
         self.trading_tools = TradingTools(
             strategy_manager=self.strategy_mgr,
@@ -75,7 +81,8 @@ class AITradingSystem:
             order_manager=self.order_mgr,
             risk_manager=self.risk_mgr,
             shioaji_client=self.shioaji,
-            notifier=self.notifier
+            notifier=self.notifier,
+            llm_provider=self.llm_provider
         )
         
         # 策略執行器
@@ -96,6 +103,9 @@ class AITradingSystem:
         # 系統狀態
         self.is_running = False
         self.main_loop_task = None
+        
+        # 自動 LLM Review 排程器
+        self.auto_review_scheduler = None
     
     @property
     def llm_provider(self):
@@ -182,6 +192,16 @@ class AITradingSystem:
         for s in strategies:
             self.logger.info(f"  - {s.name} ({s.symbol}): {'啟用' if s.enabled else '停用'}")
         
+        # 初始化自動 LLM Review 排程器
+        if self.config.auto_review.enabled and self.config.auto_review.schedules:
+            from src.analysis.auto_review_scheduler import AutoReviewScheduler
+            self.auto_review_scheduler = AutoReviewScheduler(
+                config=self.config,
+                trading_tools=self.trading_tools,
+                notifier=self.notifier
+            )
+            self.logger.info(f"自動 LLM Review 排程器已啟用，共 {len(self.config.auto_review.schedules)} 個排程")
+        
         # 發送啟動通知
         mode = "模擬" if self.config.shioaji.simulation else "實盤"
         self.notifier.send_message(
@@ -237,6 +257,9 @@ class AITradingSystem:
             self.logger.error("系統初始化失敗")
             return
         
+        # 啟動 Telegram Bot
+        await self.telegram_bot.start()
+        
         self.is_running = True
         self.logger.info("系統啟動完成，開始執行主迴圈...")
         
@@ -253,6 +276,9 @@ class AITradingSystem:
         """停止系統"""
         self.logger.info("系統正在停止...")
         self.is_running = False
+        
+        # 停止 Telegram Bot
+        await self.telegram_bot.stop()
         
         if self.main_loop_task:
             self.main_loop_task.cancel()
@@ -302,6 +328,10 @@ class AITradingSystem:
                         "風控停止",
                         f"單日虧損已達 {self.risk_mgr.max_daily_loss} 元，停止所有交易"
                     )
+                
+                # 7. 檢查自動 LLM Review 排程
+                if self.auto_review_scheduler:
+                    self.auto_review_scheduler.check_and_trigger()
                 
             except Exception as e:
                 self.logger.error(f"主迴圈錯誤: {e}")
@@ -361,6 +391,12 @@ class AITradingSystem:
 • orders / 訂單 - 訂單歷史
 • price <代碼> - 查詢報價
 例: price TXF
+• status <ID> - 策略狀態
+例: status strategy_001
+• performance <ID> [period] - 策略績效
+例: performance strategy_001 month
+• review <ID> - LLM 審查策略
+例: review strategy_001
 
 📦 【策略管理】
 • enable <ID> - 啟用策略
@@ -369,8 +405,14 @@ class AITradingSystem:
 例: disable strategy_001
 • confirm disable <ID> - 確認停用並平倉
 例: confirm disable strategy_001
-• 透過 AI Agent 建立/更新/刪除策略
-例: "建立策略 ID=my_rsi, 名稱=RSI策略, 代碼=TXF, 描述=RSI低於30買入"
+
+🎯 【目標與優化】
+• goal <ID> <金額> <單位> - 設定目標
+例: goal strategy_001 500 daily (每日500元)
+例: goal strategy_001 10000 monthly (每月10000元)
+• optimize <ID> - 優化策略
+例: optimize strategy_001
+• confirm optimize - 確認優化修改
 
 ❓ 【其他】
 • help / ? - 顯示此列表
@@ -442,6 +484,22 @@ class AITradingSystem:
         elif command in ["performance", "績效"]:
             return self.trading_tools.get_performance()
         
+        elif command.startswith("performance "):
+            parts = command.split(" ", 1)[1]
+            args = parts.split()
+            
+            strategy_id = args[0] if args else ""
+            
+            if not strategy_id:
+                return "請提供策略 ID：performance <ID> [period]"
+            
+            if len(args) >= 2:
+                period = args[1]
+            else:
+                period = "all"
+            
+            return self.trading_tools.get_strategy_performance(strategy_id, period)
+        
         elif command in ["risk", "風控"]:
             return self.trading_tools.get_risk_status()
         
@@ -466,6 +524,60 @@ class AITradingSystem:
         elif command.startswith("price "):
             symbol = command.split(" ", 1)[1].upper()
             return self.trading_tools.get_market_data(symbol)
+        
+        elif command.startswith("status "):
+            strategy_id = command.split(" ", 1)[1]
+            return self.trading_tools.get_strategy_status(strategy_id)
+        
+        elif command.startswith("review "):
+            strategy_id = command.split(" ", 1)[1]
+            return self.trading_tools.review_strategy(strategy_id)
+        
+        elif command.startswith("optimize "):
+            strategy_id = command.split(" ", 1)[1]
+            result = self.trading_tools.optimize_strategy(strategy_id)
+            if "正在進行 LLM 策略審查" in result:
+                return self.trading_tools._process_optimization_review()
+            return result
+        
+        elif command in ["confirm optimize", "確認優化"]:
+            if self.trading_tools._pending_optimization and self.trading_tools._pending_optimization.get("stage") == "confirm":
+                return self.trading_tools.confirm_optimize(confirmed=True)
+            return "❌ 沒有待確認的優化，請先輸入「optimize <策略ID>」"
+        
+        elif command.startswith("set_goal "):
+            parts = command.split(" ", 1)[1]
+            args = parts.split()
+            
+            if len(args) < 3:
+                return "請提供完整參數：set_goal <ID> <目標金額> <單位>\n例如：set_goal strategy_001 500 daily"
+            
+            strategy_id = args[0]
+            try:
+                goal = float(args[1])
+            except ValueError:
+                return "目標金額必須是數字"
+            
+            goal_unit = args[2].lower()
+            
+            return self.trading_tools.set_strategy_goal(strategy_id, goal, goal_unit)
+        
+        elif command.startswith("goal "):
+            parts = command.split(" ", 1)[1]
+            args = parts.split()
+            
+            if len(args) < 3:
+                return "請提供完整參數：goal <ID> <目標金額> <單位>\n例如：goal strategy_001 500 daily"
+            
+            strategy_id = args[0]
+            try:
+                goal = float(args[1])
+            except ValueError:
+                return "目標金額必須是數字"
+            
+            goal_unit = args[2].lower()
+            
+            return self.trading_tools.set_strategy_goal(strategy_id, goal, goal_unit)
         
         else:
             return "無法理解指令，輸入 help 查看"

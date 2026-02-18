@@ -1,4 +1,4 @@
 """Notify package"""
-from src.notify.telegram import TelegramNotifier
+from src.notify.telegram import TelegramNotifier, TelegramBot
 
-__all__ = ["TelegramNotifier"]
+__all__ = ["TelegramNotifier", "TelegramBot"]

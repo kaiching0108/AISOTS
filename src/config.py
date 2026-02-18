@@ -2,7 +2,7 @@
 import yaml
 from pathlib import Path
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 
 
 class ShioajiConfig(BaseModel):
@@ -74,6 +74,8 @@ class StrategyConfig(BaseModel):
     prompt: str
     enabled: bool = False
     params: StrategyParams
+    goal: Optional[float] = None
+    goal_unit: Optional[str] = "daily"
 
 
 class LoggingConfig(BaseModel):
@@ -81,6 +83,19 @@ class LoggingConfig(BaseModel):
     file: str = "workspace/logs/trading.log"
     max_bytes: int = 10485760
     backup_count: int = 5
+
+
+class AutoReviewSchedule(BaseModel):
+    """自動 LLM Review 排程設定"""
+    strategy_id: str
+    period: int = 1
+    unit: str = "day"  # day/week/month/quarter/year
+
+
+class AutoReviewConfig(BaseModel):
+    """自動 LLM Review 配置"""
+    enabled: bool = False
+    schedules: List[AutoReviewSchedule] = []
 
 
 class AppConfig(BaseModel):
@@ -91,6 +106,7 @@ class AppConfig(BaseModel):
     trading: TradingConfig
     strategies: list[StrategyConfig]
     logging: LoggingConfig
+    auto_review: AutoReviewConfig = AutoReviewConfig()
 
 
 def load_config(config_path: str = "config.yaml") -> AppConfig:

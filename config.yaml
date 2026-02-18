@@ -43,6 +43,8 @@ strategies:
   - id: "strategy_001"
     name: "台指突破策略"
     symbol: "TXF"              # 期貨代碼
+    goal: 500                  # 目標：每日賺 500 元
+    goal_unit: "daily"         # 目標單位: daily/weekly/monthly/quarterly/yearly
     prompt: |
       當台指期貨15分K突破當日高點時買進，
       跌破當日低點時賣出。
@@ -57,6 +59,8 @@ strategies:
   - id: "strategy_002"
     name: "小台均值回歸"
     symbol: "MXF"
+    goal: 3000                 # 目標：每週賺 3000 元
+    goal_unit: "weekly"
     prompt: |
       當小台指價格偏離均線2%以上時順勢進場，
       價格回到均線時平倉。
@@ -71,6 +75,7 @@ strategies:
   - id: "strategy_003"
     name: "電子期動量"
     symbol: "EFF"
+    # 沒有 goal 欄位表示沒有設定目標
     prompt: |
       電子期1小時動量策略，
       連續3根陽線且成交量放大時買進。
@@ -88,3 +93,25 @@ logging:
   file: "workspace/logs/trading.log"
   max_bytes: 10485760  # 10MB
   backup_count: 5
+
+# 自動 LLM Review 排程
+# 說明：
+# - enabled: 是否啟用自動 review
+# - schedules: 排程列表
+#   - strategy_id: 策略 ID
+#   - period: 週期數字
+#   - unit: 單位 (day/week/month/quarter/year)
+# - 沒有設定 goal 的策略會跳過不觸發
+# - 排程觸發每天最多 1 次，手動執行 review 不受限制
+auto_review:
+  enabled: false
+  # schedules:
+  #   - strategy_id: "strategy_001"
+  #     period: 5
+  #     unit: "day"      # 每 5 天觸發一次
+  #   - strategy_id: "strategy_002"
+  #     period: 2
+  #     unit: "week"     # 每 2 週觸發一次
+  #   - strategy_id: "strategy_003"
+  #     period: 1
+  #     unit: "month"    # 每月觸發一次

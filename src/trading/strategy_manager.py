@@ -13,6 +13,7 @@ class StrategyManager:
     """策略管理器 - 管理3個策略"""
     
     def __init__(self, workspace_dir: Path):
+        self.workspace_dir = workspace_dir
         self.store = StrategyStore(workspace_dir)
         self.strategies: Dict[str, Strategy] = {}
         self._load_strategies()

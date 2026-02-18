@@ -21,7 +21,8 @@ class TradingTools:
         order_manager: OrderManager,
         risk_manager: RiskManager,
         shioaji_client,
-        notifier
+        notifier,
+        llm_provider=None
     ):
         self.strategy_mgr = strategy_manager
         self.position_mgr = position_manager
@@ -29,11 +30,14 @@ class TradingTools:
         self.risk_mgr = risk_manager
         self.api = shioaji_client
         self.notifier = notifier
+        self._llm_provider = llm_provider
         
         self._pending_strategy: Optional[Dict[str, Any]] = None
         self._awaiting_symbol: bool = False
         self._awaiting_confirm: bool = False
         self._current_goal: Optional[str] = None
+        
+        self._pending_optimization: Optional[Dict[str, Any]] = None
     
     # ========== 策略工具 ==========
     
@@ -52,6 +56,41 @@ class TradingTools:
             text += f"  合約: {s.symbol}\n"
             text += f"  狀態: {status}\n"
             text += f"  參數: {s.params}\n\n"
+        
+        return text
+    
+    def get_strategy_status(self, strategy_id: str) -> str:
+        """取得特定策略狀態"""
+        strategies = self.strategy_mgr.get_all_strategies()
+        
+        strategy = strategies.get(strategy_id)
+        if not strategy:
+            return f"❌ 找不到策略: {strategy_id}"
+        
+        status = "✅ 執行中" if strategy.is_running else "❌ 已停用"
+        pnl = ""
+        
+        position = self.position_mgr.get_position(strategy_id)
+        if position and position.quantity > 0:
+            pnl = f"""
+部位:
+  合約: {position.symbol}
+  方向: {position.direction} {position.quantity}口
+  進場: {position.entry_price} → 現價: {position.current_price}
+  損益: {position.pnl:+,.0f}"""
+        
+        text = f"""📊 *策略狀態*
+─────────────
+ID: {strategy.id}
+名稱: {strategy.name}
+合約: {strategy.symbol}
+狀態: {status}
+K線週期: {strategy.params.get('timeframe', 'N/A')}
+停損: {strategy.params.get('stop_loss', 0)}點
+止盈: {strategy.params.get('take_profit', 0)}點
+數量: {strategy.params.get('position_size', 1)}口
+最後訊號: {strategy.last_signal or 'N/A'}
+最後訊號時間: {strategy.last_signal_time or 'N/A'}{pnl}"""
         
         return text
     
@@ -478,14 +517,28 @@ ID: {strategy_id}
                 "stop_loss": params["stop_loss"],
                 "take_profit": params["take_profit"]
             },
-            enabled=False
+            enabled=False,
+            goal=params.get("goal"),
+            goal_unit=params.get("goal_unit", "daily")
         )
         
         self.strategy_mgr.add_strategy(strategy)
         
+        goal_text = ""
+        if params.get("goal"):
+            unit_names = {
+                "daily": "每日",
+                "weekly": "每週", 
+                "monthly": "每月",
+                "quarterly": "每季",
+                "yearly": "每年"
+            }
+            unit = params.get("goal_unit", "daily")
+            goal_text = f"目標: {unit_names.get(unit, unit)}賺 {params['goal']:,} 元\n"
+        
         result = f"""
 ✅ *策略已建立*
-────────────────
+───────────────
 ID: {params['strategy_id']}
 名稱: {params['name']}
 期貨代碼: {params['symbol']}
@@ -494,7 +547,7 @@ K線週期: {params['timeframe']}
 數量: {params['quantity']}
 停損: {params['stop_loss']}點
 止盈: {params['take_profit']}點
-
+{goal_text}
 請使用 `enable {params['strategy_id']}` 啟用策略
 """
         
@@ -784,7 +837,7 @@ K線週期: {params['timeframe']}
         
         text = f"""
 📊 *績效統計*
-────────────
+──────────────
 日期: {stats['today']}
 總委託: {stats['total_orders']}
 成交: {stats['filled']}
@@ -796,6 +849,406 @@ K線週期: {params['timeframe']}
 """
         
         return text
+    
+    def get_strategy_performance(self, strategy_id: str, period: str = "all") -> str:
+        """取得特定策略的績效
+        
+        Args:
+            strategy_id: 策略 ID
+            period: 查詢週期 (today/week/month/quarter/year/all)
+            
+        Returns:
+            str: 績效報告
+        """
+        strategy = self.strategy_mgr.get_strategy(strategy_id)
+        if not strategy:
+            return f"❌ 找不到策略: {strategy_id}"
+        
+        if not hasattr(self, '_performance_analyzer'):
+            from src.analysis.performance_analyzer import PerformanceAnalyzer
+            from src.analysis.signal_recorder import SignalRecorder
+            workspace = self.strategy_mgr.workspace_dir
+            signal_recorder = SignalRecorder(workspace)
+            self._performance_analyzer = PerformanceAnalyzer(signal_recorder)
+        
+        return self._performance_analyzer.format_performance_report(strategy_id, period)
+    
+    def review_strategy(self, strategy_id: str) -> str:
+        """讓 LLM 審查策略並給出修改建議
+        
+        Args:
+            strategy_id: 策略 ID
+            
+        Returns:
+            str: LLM 審查結果
+        """
+        strategy = self.strategy_mgr.get_strategy(strategy_id)
+        if not strategy:
+            return f"❌ 找不到策略: {strategy_id}"
+        
+        if not hasattr(self, '_strategy_reviewer'):
+            from src.analysis.strategy_reviewer import StrategyReviewer
+            from src.analysis.performance_analyzer import PerformanceAnalyzer
+            from src.analysis.signal_recorder import SignalRecorder
+            
+            workspace = self.strategy_mgr.workspace_dir
+            signal_recorder = SignalRecorder(workspace)
+            performance_analyzer = PerformanceAnalyzer(signal_recorder)
+            
+            self._strategy_reviewer = StrategyReviewer(
+                llm_provider=self._llm_provider,
+                performance_analyzer=performance_analyzer
+            )
+        
+        strategy_info = {
+            "name": strategy.name,
+            "symbol": strategy.symbol,
+            "prompt": strategy.prompt,
+            "goal": strategy.goal,
+            "goal_unit": strategy.goal_unit,
+            "params": strategy.params
+        }
+        
+        return self._strategy_reviewer.review(strategy_id, strategy_info)
+    
+    def optimize_strategy(self, strategy_id: str) -> str:
+        """優化策略 - 檢查目標達成情況並根據需要進行優化
+        
+        Args:
+            strategy_id: 策略 ID
+            
+        Returns:
+            str: 優化建議或確認訊息
+        """
+        strategy = self.strategy_mgr.get_strategy(strategy_id)
+        if not strategy:
+            return f"❌ 找不到策略: {strategy_id}"
+        
+        goal = strategy.goal
+        goal_unit = strategy.goal_unit
+        
+        if not goal or goal <= 0:
+            return f"""
+⚠️ 策略 {strategy_id} 尚未設定目標。
+
+請先設定目標後再進行優化：
+set_goal {strategy_id} <目標金額> <單位>
+
+例如：
+- set_goal {strategy_id} 500 daily (每日賺500元)
+- set_goal {strategy_id} 10000 monthly (每月賺10000元)
+"""
+        
+        if not hasattr(self, '_performance_analyzer'):
+            from src.analysis.performance_analyzer import PerformanceAnalyzer
+            from src.analysis.signal_recorder import SignalRecorder
+            workspace = self.strategy_mgr.workspace_dir
+            signal_recorder = SignalRecorder(workspace)
+            self._performance_analyzer = PerformanceAnalyzer(signal_recorder)
+        
+        period_map = {
+            "daily": "today",
+            "weekly": "week", 
+            "monthly": "month",
+            "quarterly": "quarter",
+            "yearly": "year"
+        }
+        period = period_map.get(goal_unit, "month")
+        
+        analysis = self._performance_analyzer.analyze(strategy_id, period)
+        stats = analysis.get("signal_stats", {})
+        
+        from datetime import date, timedelta
+        period_days = 1
+        if goal_unit == "daily":
+            period_days = 1
+        elif goal_unit == "weekly":
+            period_days = 7
+        elif goal_unit == "monthly":
+            period_days = 30
+        elif goal_unit == "quarterly":
+            period_days = 90
+        elif goal_unit == "yearly":
+            period_days = 365
+        
+        period_profit = stats.get("total_pnl", 0)
+        
+        achieved = self._performance_analyzer.check_goal_achieved(
+            goal=goal,
+            goal_unit=goal_unit,
+            period_profit=period_profit,
+            period_days=period_days
+        )
+        
+        unit_names = {
+            "daily": "每日",
+            "weekly": "每週", 
+            "monthly": "每月",
+            "quarterly": "每季",
+            "yearly": "每年"
+        }
+        unit_name = unit_names.get(goal_unit, "")
+        
+        if achieved:
+            return f"""
+🎉 *目標已達成！*
+
+策略: {strategy_id} ({strategy.name})
+目標: {unit_name}賺 {goal:,} 元
+實際: {unit_name}賺 {period_profit:+,.0f} 元
+
+✅ 策略表現優異，無需優化！
+"""
+        
+        deficit = goal * period_days if goal_unit == "daily" else goal - period_profit
+        if goal_unit == "weekly":
+            deficit = goal - (period_profit / 7 * 30) if period_profit < goal else 0
+        elif goal_unit == "daily":
+            deficit = goal - period_profit if period_days == 1 else goal * period_days - period_profit
+        
+        self._pending_optimization = {
+            "strategy_id": strategy_id,
+            "strategy_name": strategy.name,
+            "goal": goal,
+            "goal_unit": goal_unit,
+            "unit_name": unit_name,
+            "period_profit": period_profit,
+            "deficit": deficit,
+            "stats": stats,
+            "stage": "review"
+        }
+        
+        return f"""
+📊 *策略優化分析*
+
+策略: {strategy_id} ({strategy.name})
+目標: {unit_name}賺 {goal:,} 元
+實際: {unit_name}賺 {period_profit:+,.0f} 元
+差距: {deficit:+,.0f} 元
+
+─ 交易統計 ─
+總訊號: {stats.get('total_signals', 0)}
+成交次數: {stats.get('filled_signals', 0)}
+勝率: {stats.get('win_rate', 0):.1f}%
+平均損益: {stats.get('avg_pnl', 0):+,.0f} 元
+停損觸發: {stats.get('stop_loss_count', 0)} 次
+止盈觸發: {stats.get('take_profit_count', 0)} 次
+
+─ 執行優化 ─
+正在進行 LLM 策略審查，請稍候...
+"""
+    
+    def _process_optimization_review(self) -> str:
+        """處理 LLM 審查結果"""
+        if not self._pending_optimization:
+            return "❌ 沒有待處理的優化"
+        
+        opt = self._pending_optimization
+        strategy_id = opt["strategy_id"]
+        
+        strategy = self.strategy_mgr.get_strategy(strategy_id)
+        if not strategy:
+            self._clear_optimization()
+            return f"❌ 找不到策略: {strategy_id}"
+        
+        if not hasattr(self, '_strategy_reviewer'):
+            from src.analysis.strategy_reviewer import StrategyReviewer
+            from src.analysis.performance_analyzer import PerformanceAnalyzer
+            from src.analysis.signal_recorder import SignalRecorder
+            
+            workspace = self.strategy_mgr.workspace_dir
+            signal_recorder = SignalRecorder(workspace)
+            performance_analyzer = PerformanceAnalyzer(signal_recorder)
+            
+            self._strategy_reviewer = StrategyReviewer(
+                llm_provider=self._llm_provider,
+                performance_analyzer=performance_analyzer
+            )
+        
+        strategy_info = {
+            "name": strategy.name,
+            "symbol": strategy.symbol,
+            "prompt": strategy.prompt,
+            "goal": opt["goal"],
+            "goal_unit": opt["goal_unit"],
+            "params": strategy.params
+        }
+        
+        try:
+            review_result = self._strategy_reviewer.review(strategy_id, strategy_info)
+            
+            opt["review_result"] = review_result
+            opt["stage"] = "confirm"
+            
+            return f"""
+📋 *LLM 審查結果*
+
+策略: {strategy_id}
+
+{review_result}
+
+─ 下一步 ─
+
+請選擇要執行的修改：
+
+1. 確認修改 - 輸入「確認優化」或「confirm optimize」
+2. 取消 - 輸入「cancel」
+
+或許你想：
+- 修改參數 - 輸入「停損改成XX」「止盈改成XX」
+- 只想查看績效 - 輸入「performance {strategy_id}」
+"""
+        except Exception as e:
+            return f"❌ LLM 審查失敗: {str(e)}"
+    
+    def confirm_optimize(self, confirmed: bool = True) -> str:
+        """確認或取消策略優化
+        
+        Args:
+            confirmed: True 表示確認執行修改，False 表示取消
+            
+        Returns:
+            str: 執行結果
+        """
+        if not self._pending_optimization:
+            return "❌ 沒有待處理的優化，請先輸入「optimize <策略ID>」"
+        
+        opt = self._pending_optimization
+        strategy_id = opt["strategy_id"]
+        
+        if not confirmed:
+            self._clear_optimization()
+            return "❌ 已取消策略優化"
+        
+        strategy = self.strategy_mgr.get_strategy(strategy_id)
+        if not strategy:
+            self._clear_optimization()
+            return f"❌ 找不到策略: {strategy_id}"
+        
+        review_result = opt.get("review_result", "")
+        
+        modification_text = ""
+        
+        lines = review_result.split("\n")
+        suggestion_type = None
+        specific_changes = []
+        capture = False
+        
+        for line in lines:
+            line = line.strip()
+            if "## 建議類型" in line:
+                capture = True
+                continue
+            if "## 具體建議" in line:
+                capture = False
+                continue
+            if capture and line:
+                suggestion_type = line.strip()
+        
+        capture = False
+        for line in lines:
+            line = line.strip()
+            if "## 具體建議" in line:
+                capture = True
+                continue
+            if capture and line:
+                specific_changes.append(line)
+        
+        if "參數" in suggestion_type or "parameter" in suggestion_type.lower():
+            for change in specific_changes:
+                if "停損" in change and "改成" in change:
+                    try:
+                        new_sl = int(change.split("改成")[1].split("點")[0].strip())
+                        strategy.params["stop_loss"] = new_sl
+                        modification_text += f"• 停損調整為 {new_sl} 點\n"
+                    except:
+                        pass
+                if "止盈" in change and "改成" in change:
+                    try:
+                        new_tp = int(change.split("改成")[1].split("點")[0].strip())
+                        strategy.params["take_profit"] = new_tp
+                        modification_text += f"• 止盈調整為 {new_tp} 點\n"
+                    except:
+                        pass
+                if "數量" in change and "改成" in change:
+                    try:
+                        new_qty = int(change.split("改成")[1].strip())
+                        strategy.params["position_size"] = new_qty
+                        modification_text += f"• 交易口數調整為 {new_qty} 口\n"
+                    except:
+                        pass
+        
+        elif "Prompt" in suggestion_type or "prompt" in suggestion_type.lower():
+            new_prompt = "\n".join(specific_changes[:3])
+            if new_prompt:
+                old_prompt = strategy.prompt
+                strategy.prompt = new_prompt
+                modification_text += f"• 策略 Prompt 已更新\n"
+        
+        elif "重新設計" in suggestion_type or "redesign" in suggestion_type.lower():
+            modification_text = "• 策略需要重新設計，請建立新策略\n"
+        
+        self.strategy_mgr.store.save_strategy(strategy.to_dict())
+        
+        self._clear_optimization()
+        
+        return f"""
+✅ *策略已優化*
+
+策略: {strategy_id} ({strategy.name})
+修改內容：
+{modification_text or "無"}
+
+修改已儲存，策略將在下次執行時使用新參數。
+"""
+    
+    def set_strategy_goal(self, strategy_id: str, goal: float, goal_unit: str) -> str:
+        """設定策略目標
+        
+        Args:
+            strategy_id: 策略 ID
+            goal: 目標金額
+            goal_unit: 目標單位 (daily/weekly/monthly/quarterly/yearly)
+            
+        Returns:
+            str: 設定結果
+        """
+        strategy = self.strategy_mgr.get_strategy(strategy_id)
+        if not strategy:
+            return f"❌ 找不到策略: {strategy_id}"
+        
+        valid_units = ["daily", "weekly", "monthly", "quarterly", "yearly"]
+        if goal_unit not in valid_units:
+            return f"❌ 無效的目標單位，請使用: {', '.join(valid_units)}"
+        
+        if goal <= 0:
+            return "❌ 目標金額必須大於 0"
+        
+        strategy.goal = goal
+        strategy.goal_unit = goal_unit
+        
+        self.strategy_mgr.store.save_strategy(strategy.to_dict())
+        
+        unit_names = {
+            "daily": "每日",
+            "weekly": "每週", 
+            "monthly": "每月",
+            "quarterly": "每季",
+            "yearly": "每年"
+        }
+        
+        return f"""
+✅ *目標已設定*
+
+策略: {strategy_id}
+目標: {unit_names[goal_unit]}賺 {goal:,} 元
+
+輸入「optimize {strategy_id}」開始優化分析
+"""
+    
+    def _clear_optimization(self) -> None:
+        """清除待處理的優化狀態"""
+        self._pending_optimization = None
     
     # ========== 風控工具 ==========
     
@@ -863,6 +1316,83 @@ Shioaji: {'✅ 連線' if conn_status else '❌ 斷線'}
                     "name": "get_performance",
                     "description": "查詢當日交易績效，包含當日損益、總委託次數、成交次數、取消次數等。相當於問「今天賺多少」、「今天績效怎麼樣」、「賺了多少」、「performance」。",
                     "parameters": {"type": "object", "properties": {}}
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_strategy_performance",
+                    "description": "查詢特定策略的績效統計，包含已實現損益、勝率、交易次數、停損止盈觸發次數等。支援查詢週期 (today/week/month/quarter/year/all)。相當於問「strategy_001 表現如何」、「這個策略賺多少」。",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "strategy_id": {"type": "string", "description": "策略 ID"},
+                            "period": {
+                                "type": "string", 
+                                "enum": ["today", "week", "month", "quarter", "year", "all"],
+                                "description": "查詢週期"
+                            }
+                        },
+                        "required": ["strategy_id"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "review_strategy",
+                    "description": "讓 LLM 審查策略並給出修改建議。會分析策略的績效、找出問題，並建議應該調整參數還是修改交易邏輯。相當於問「幫我看看這個策略怎麼樣」、「review strategy_001」。",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "strategy_id": {"type": "string", "description": "策略 ID"}
+                        },
+                        "required": ["strategy_id"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "optimize_strategy",
+                    "description": "優化策略 - 檢查目標達成情況，若未達成則觸發 LLM 審查並提供修改建議。相當於問「optimize strategy_001」、「優化策略 strategy_001」。",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "strategy_id": {"type": "string", "description": "策略 ID"}
+                        },
+                        "required": ["strategy_id"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "confirm_optimize",
+                    "description": "確認執行策略優化修改。當用戶說「確認優化」或「confirm optimize」時調用。",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "confirmed": {"type": "boolean", "description": "True 表示確認執行修改，False 表示取消"}
+                        },
+                        "required": ["confirmed"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "set_strategy_goal",
+                    "description": "設定策略的獲利目標。當用戶說「設定目標」或「set goal」時調用。目標單位支援 daily(每日)、weekly(每週)、monthly(每月)、quarterly(每季)、yearly(每年)。",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "strategy_id": {"type": "string", "description": "策略 ID"},
+                            "goal": {"type": "number", "description": "目標金額"},
+                            "goal_unit": {"type": "string", "description": "目標單位 (daily/weekly/monthly/quarterly/yearly)"}
+                        },
+                        "required": ["strategy_id", "goal", "goal_unit"]
+                    }
                 }
             },
             {
@@ -1048,6 +1578,24 @@ Shioaji: {'✅ 連線' if conn_status else '❌ 斷線'}
             "get_positions": lambda: self.get_positions(),
             "get_strategies": lambda: self.get_strategies(),
             "get_performance": lambda: self.get_performance(),
+            "get_strategy_performance": lambda: self.get_strategy_performance(
+                strategy_id=arguments.get("strategy_id", ""),
+                period=arguments.get("period", "all")
+            ),
+            "review_strategy": lambda: self.review_strategy(
+                strategy_id=arguments.get("strategy_id", "")
+            ),
+            "optimize_strategy": lambda: self.optimize_strategy(
+                strategy_id=arguments.get("strategy_id", "")
+            ),
+            "confirm_optimize": lambda: self.confirm_optimize(
+                confirmed=arguments.get("confirmed", True)
+            ),
+            "set_strategy_goal": lambda: self.set_strategy_goal(
+                strategy_id=arguments.get("strategy_id", ""),
+                goal=arguments.get("goal", 0),
+                goal_unit=arguments.get("goal_unit", "daily")
+            ),
             "get_risk_status": lambda: self.get_risk_status(),
             "get_order_history": lambda: self.get_order_history(arguments.get("strategy_id")),
             "get_market_data": lambda: self.get_market_data(arguments.get("symbol", "")),

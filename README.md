@@ -1,16 +1,16 @@
 # AI 期貨交易系統 (AI Futures Trading System)
 
-使用 Shioaji API 的 AI 驅動期貨交易系統，支援 LLM 策略生成。
+使用 Shioaji API 的 AI 驅動期貨交易系統，支援 LLM 策略生成與自我優化。
 
 ## 功能特色
 
 - 🤖 **AI 策略生成** - 用自然語言描述策略，LLM 自動生成程式碼
 - 🎯 **目標驅動策略** - 只需給出目標（如「每日賺500元」），LLM 自動推斷參數並確認後建立
+- 📈 **自我優化系統** - 設定目標 → LLM 設計策略 → 執行 → 績效分析 → LLM 審查優化 → 達成目標
+- 🔔 **Telegram Bot** - 接收命令互動，下單、成交、風控警告即時通知
 - 📊 **多種 LLM 支援** - Ollama, OpenAI, Anthropic, DeepSeek, OpenRouter
-- 📈 **技術指標** - 支援 RSI, MACD, SMA, EMA, BB, ATR, KD 等（使用 pandas_ta）
-- 🔔 **Telegram 通知** - 下單、成交、風控警告即時通知
 - 🛡️ **風控機制** - 單日虧損、最大部位、下單頻率限制
-- 💾 **資料持久化** - JSON 格式儲存策略、部位、訂單
+- 💾 **資料持久化** - JSON 格式儲存策略、部位、訂單、訊號
 
 ## 安裝
 
@@ -38,6 +38,20 @@ llm:
 telegram:
   bot_token: "YOUR_BOT_TOKEN"
   chat_id: "YOUR_CHAT_ID"
+
+strategies:
+  - id: "strategy_001"
+    name: "每日收益策略"
+    symbol: "TXF"
+    goal: 500              # 目標：每日賺 500 元
+    goal_unit: "daily"    # 目標單位: daily/weekly/monthly/quarterly/yearly
+    prompt: "RSI 低於 30 買入，高於 70 賣出"
+    enabled: true
+    params:
+      timeframe: "15m"
+      stop_loss: 50
+      take_profit: 100
+      position_size: 1
 ```
 
 ## 使用方式
@@ -46,7 +60,7 @@ telegram:
 python main.py
 ```
 
-### 建立策略的兩種方式
+### 建立策略的兩種方式 (by Telegram)
 
 #### 方式一：手動輸入完整參數
 ```
@@ -61,15 +75,101 @@ python main.py
 
 LLM 會自動推斷參數，展示給用戶確認後建立策略。
 
-### 指令列表
+### Telegram 命令列表
 
+#### 基本命令
 | 指令 | 說明 |
 |------|------|
 | status | 系統狀態 |
 | positions | 目前部位 |
 | strategies | 策略列表 |
+| performance | 整體當日績效 |
+| risk | 風控狀態 |
+| orders | 訂單歷史 |
 | enable \<ID\> | 啟用策略 |
 | disable \<ID\> | 停用策略 |
+| price \<symbol\> | 查詢報價 |
+| status \<ID\> | 策略狀態 |
+
+#### 績效分析命令
+| 指令 | 說明 |
+|------|------|
+| performance \<ID\> | 查詢策略全部歷史績效 |
+| performance \<ID\> today | 查詢策略今日績效 |
+| performance \<ID\> week | 查詢策略本週績效 |
+| performance \<ID\> month | 查詢策略本月績效 |
+| performance \<ID\> quarter | 查詢策略本季績效 |
+| performance \<ID\> year | 查詢策略本年績效 |
+
+#### 自我優化命令
+| 指令 | 說明 |
+|------|------|
+| goal \<ID\> \<金額\> \<單位\> | 設定策略目標 |
+| set_goal \<ID\> \<金額\> \<單位\> | 設定策略目標 |
+| review \<ID\> | LLM 審查策略並給出修改建議 |
+| optimize \<ID\> | 執行完整優化流程 |
+| confirm optimize | 確認執行優化修改 |
+
+## 自我優化系統
+
+### 系統願景
+
+```
+用戶輸入目標 → LLM 設計策略 → 執行 → 績效分析 → LLM 審查優化 → 達成目標
+```
+
+### 目標設定
+
+每個策略可以設定明確的數值目標：
+
+| 欄位 | 說明 | 範例 |
+|------|------|------|
+| goal | 目標數值（必須為數字）| 500 |
+| goal_unit | 目標單位 | daily/weekly/monthly/quarterly/yearly |
+
+### 完整優化流程
+
+```
+1. 用戶輸入目標（如「每日賺500元」）
+2. LLM 設計策略 → 用戶確認
+3. 策略執行 → 記錄訊號 → 更新結果
+4. 績效分析 → 檢查目標是否達成
+   ├── 已達成 → 維持現狀
+   └── 未達成 → LLM 審查 → 建議修改
+5. 用戶確認修改 → 更新策略
+6. 繼續執行 → 循環直到達成目標
+```
+
+### LLM 建議類型
+
+LLM 審查後可能給出以下建議：
+
+| 類型 | 說明 | 範例 |
+|------|------|------|
+| 參數調整 | 修改停損、止盈、數量等 | 「停損太近，建議從 30 點改為 50 點」 |
+| Prompt 微調 | 修改交易邏輯描述 | 「建議加入 MACD 確認訊號」 |
+| 重新設計 | 完全重新設計策略 | 「 RSI 策略不適合當前市場」 |
+
+### 自動 LLM Review 支援自動定時觸發排程
+
+系統 LLM 審查，無需手動輸入命令：
+
+```yaml
+auto_review:
+  enabled: true
+  schedules:
+    - strategy_id: "strategy_001"
+      period: 5
+      unit: "day"      # 每 5 天觸發一次
+    - strategy_id: "strategy_002"
+      period: 2
+      unit: "week"     # 每 2 週觸發一次
+```
+
+**規則**：
+- 每天每策略最多觸發 1 次
+- 手動 `review` 命令不受限制
+- 無 goal 策略會跳過
 
 ## 專案結構
 
@@ -101,6 +201,11 @@ ai_futures_trading/
 │   │   ├── rule_engine.py   # 規則引擎
 │   │   └── rule_parser.py   # 規則解析器
 │   │
+│   ├── analysis/          # 績效分析模組
+│   │   ├── signal_recorder.py    # 訊號記錄器
+│   │   ├── performance_analyzer.py # 績效分析器
+│   │   └── strategy_reviewer.py  # LLM 策略審查
+│   │
 │   ├── agent/            # AI Agent
 │   │   ├── tools.py          # 交易工具
 │   │   ├── prompts.py       # 提示詞
@@ -118,7 +223,7 @@ ai_futures_trading/
 │   │   └── risk_manager.py
 │   │
 │   ├── notify/          # 通知系統
-│   │   └── telegram.py
+│   │   └── telegram.py  # Telegram 通知 + Bot
 │   │
 │   └── config.py        # 配置載入
 │
@@ -131,10 +236,12 @@ ai_futures_trading/
 │   └── test_trading.py
 │
 └── workspace/          # 執行時資料
-    ├── strategies.json
-    ├── positions.json
-    ├── orders.json
+    ├── strategies.json   # 策略配置
+    ├── positions.json   # 部位記錄
+    ├── orders.json     # 訂單記錄
+    ├── signals.json    # 訊號記錄
     └── logs/
+        └── trading.log
 ```
 
 ## 技術
@@ -142,7 +249,19 @@ ai_futures_trading/
 - Python 3.10+
 - Shioaji API
 - pandas_ta
-- LLM (Ollama/OpenAI/Anthropic)
+- python-telegram-bot
+- LLM (Ollama/OpenAI/Anthropic/DeepSeek)
+
+## 版本資訊
+
+| 版本 | 說明 |
+|------|------|
+| 1.0.0 | 初始版本，支援3個策略 |
+| 2.0.0 | 新增 LLM 策略生成器與策略框架 |
+| 2.1.0 | 新增 Telegram Bot 接收機制 |
+| 3.0.0 | 新增自我優化系統 - 第一階段 |
+| 3.1.0 | 新增自我優化系統 - 第二階段 |
+| 3.2.0 | 新增自我優化系統 - 第三階段 |
 
 ## License
 
