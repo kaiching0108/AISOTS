@@ -133,9 +133,35 @@ class PerformanceAnalyzer:
             "signal_reversal_count": signal_reversal_count,
             "total_pnl": sum(pnl_values),
             "avg_pnl": sum(pnl_values) / len(pnl_values) if pnl_values else 0.0,
+            "avg_profit": sum(wins) / len(wins) if wins else 0.0,
+            "avg_loss": abs(sum(losses) / len(losses)) if losses else 0.0,
             "best_trade": max(pnl_values) if pnl_values else 0.0,
-            "worst_trade": min(pnl_values) if pnl_values else 0.0
+            "worst_trade": min(pnl_values) if pnl_values else 0.0,
+            "max_drawdown": self._calculate_max_drawdown(pnl_values)
         }
+    
+    def _calculate_max_drawdown(self, pnl_values: list) -> float:
+        """計算最大回撤
+        
+        最大回撤 = 峰值 - 谷底
+        從歷史最高點下跌的最大幅度
+        """
+        if not pnl_values:
+            return 0.0
+        
+        peak = 0
+        max_dd = 0
+        cumulative = 0
+        
+        for pnl in pnl_values:
+            cumulative += pnl
+            if cumulative > peak:
+                peak = cumulative
+            dd = peak - cumulative
+            if dd > max_dd:
+                max_dd = dd
+        
+        return max_dd
     
     def format_performance_report(
         self, 
@@ -181,8 +207,11 @@ class PerformanceAnalyzer:
 
 已實現損益: {stats['total_pnl']:+,.0f}元
 平均交易損益: {stats['avg_pnl']:+,.0f}元
+平均獲利: {stats['avg_profit']:+,.0f}元
+平均虧損: {stats['avg_loss']:+,.0f}元
 最大單次獲利: {stats['best_trade']:+,.0f}元
 最大單次虧損: {stats['worst_trade']:+,.0f}元
+最大回撤: {stats['max_drawdown']:+,.0f}元
 
 停損觸發: {stats['stop_loss_count']}次
 止盈觸發: {stats['take_profit_count']}次
