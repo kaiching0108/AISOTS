@@ -638,7 +638,6 @@ ID: strategy_001
 | 命令 | 說明 | 範例 |
 |------|------|------|
 | `goal <ID> <金額> <單位>` | 設定策略目標 | goal strategy_001 500 daily |
-| `set_goal <ID> <金額> <單位>` | 設定策略目標 | set_goal strategy_001 10000 monthly |
 | `review <ID>` | LLM 審查策略並給出修改建議 | review strategy_001 |
 | `optimize <ID>` | 執行完整優化流程 | optimize strategy_001 |
 | `confirm optimize` | 確認執行優化修改 | confirm optimize |

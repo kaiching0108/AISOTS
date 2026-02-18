@@ -545,23 +545,6 @@ class AITradingSystem:
                 return self.trading_tools.confirm_optimize(confirmed=True)
             return "❌ 沒有待確認的優化，請先輸入「optimize <策略ID>」"
         
-        elif command.startswith("set_goal "):
-            parts = command.split(" ", 1)[1]
-            args = parts.split()
-            
-            if len(args) < 3:
-                return "請提供完整參數：set_goal <ID> <目標金額> <單位>\n例如：set_goal strategy_001 500 daily"
-            
-            strategy_id = args[0]
-            try:
-                goal = float(args[1])
-            except ValueError:
-                return "目標金額必須是數字"
-            
-            goal_unit = args[2].lower()
-            
-            return self.trading_tools.set_strategy_goal(strategy_id, goal, goal_unit)
-        
         elif command.startswith("goal "):
             parts = command.split(" ", 1)[1]
             args = parts.split()

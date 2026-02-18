@@ -689,7 +689,6 @@ LLM 審查後可能給出以下建議：
 | 命令 | 功能 |
 |------|------|
 | `goal <ID> <金額> <單位>` | 設定策略目標 |
-| `set_goal <ID> <金額> <單位>` | 設定策略目標 |
 | `performance <ID>` | 查詢策略績效 |
 | `performance <ID> today/week/month/quarter/year` | 查詢特定期間績效 |
 | `performance <ID> <begin_date> <end_date>` | 自訂日期範圍 |
