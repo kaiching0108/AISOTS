@@ -52,6 +52,8 @@ class PositionModel(BaseModel):
     pnl: float = 0.0
     stop_loss: Optional[float] = None
     take_profit: Optional[float] = None
+    signal_id: Optional[str] = None
+    strategy_version: int = 1
     
     def calculate_pnl(self, current_price: float) -> float:
         """計算未實現損益"""

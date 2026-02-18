@@ -131,3 +131,4 @@ def ensure_workspace() -> None:
     workspace = get_workspace_dir()
     workspace.mkdir(exist_ok=True)
     (workspace / "logs").mkdir(exist_ok=True)
+    (workspace / "signals").mkdir(exist_ok=True)
