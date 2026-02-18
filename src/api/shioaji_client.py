@@ -128,6 +128,35 @@ class ShioajiClient:
         
         return symbols
     
+    def get_futures_name_mapping(self) -> Dict[str, str]:
+        """取得期貨代碼與中文名稱的對應表"""
+        result = {}
+        try:
+            futures = self.api.Contracts.Futures
+            if futures:
+                for attr in dir(futures):
+                    if not attr.startswith('_') and not attr.isupper():
+                        contract = getattr(futures, attr, None)
+                        if contract:
+                            name = getattr(contract, 'name', None) or getattr(contract, 'csname', None)
+                            if name:
+                                result[attr] = name
+                logger.info(f"從 Shioaji 取得期貨代碼對應表: {len(result)} 個")
+        except Exception as e:
+            logger.warning(f"取得期貨代碼對應表失敗: {e}")
+        
+        if not result:
+            result = {
+                "TXF": "臺股期貨",
+                "MXF": "微型臺指期貨",
+                "EFF": "電子期貨",
+                "T5F": "微型電子期貨",
+                "XIF": "小型電子期貨"
+            }
+            logger.warning(f"使用預設期貨代碼對應表: {result}")
+        
+        return result
+    
     def place_order(
         self,
         symbol: str,

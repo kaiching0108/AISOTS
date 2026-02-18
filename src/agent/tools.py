@@ -37,6 +37,9 @@ class TradingTools:
         else:
             self._valid_symbols = ["TXF", "MXF", "EFF", "T5F", "XIF"]
         
+        # 期貨代碼與中文名稱對應表
+        self._futures_names: Dict[str, str] = {}
+        
         self._pending_strategy: Optional[Dict[str, Any]] = None
         self._awaiting_symbol: bool = False
         self._awaiting_confirm: bool = False
@@ -74,6 +77,33 @@ class TradingTools:
                 logger.info(f"已從 Shioaji 取得可用期貨代碼: {symbols}")
             except Exception as e:
                 logger.warning(f"從 Shioaji 取得期貨代碼失敗: {e}")
+        
+        # 取得期貨代碼對應的中文名稱
+        if self.api:
+            try:
+                self._futures_names = self.api.get_futures_name_mapping()
+                logger.info(f"已取得期貨代碼對應表: {self._futures_names}")
+            except Exception as e:
+                logger.warning(f"取得期貨代碼對應表失敗: {e}")
+                self._futures_names = {
+                    "TXF": "臺股期貨",
+                    "MXF": "微型臺指期貨",
+                    "EFF": "電子期貨",
+                    "T5F": "微型電子期貨",
+                    "XIF": "小型電子期貨"
+                }
+    
+    def get_futures_name(self, symbol: str) -> str:
+        """取得期貨代碼的中文名稱"""
+        return self._futures_names.get(symbol, symbol)
+    
+    def get_futures_list_for_llm(self) -> str:
+        """取得期貨列表（供 LLM 使用）"""
+        if not self._futures_names:
+            self.update_valid_symbols()
+        
+        items = [f"- {code}: {name}" for code, name in self._futures_names.items()]
+        return "\n".join(items[:20])  # 限制顯示前20個
     
     # ========== 策略工具 ==========
     
@@ -399,7 +429,9 @@ ID: {strategy_id}
         symbol = symbol.upper().strip()
         
         if symbol not in self._valid_symbols:
-            return f"❌ 無效的期貨代碼：{symbol}，請輸入有效的代碼（如 {', '.join(self._valid_symbols)}）"
+            name = self.get_futures_name(symbol)
+            valid_list = [f"{s}({self.get_futures_name(s)})" for s in self._valid_symbols[:10]]
+            return f"❌ 無效的期貨代碼：{name}\n可用代碼：{', '.join(valid_list)}"
         
         self._awaiting_symbol = False
         self._awaiting_confirm = True
@@ -542,7 +574,8 @@ ID: {strategy_id}
                 params["symbol"] = new_symbol
                 modified = True
             else:
-                return f"❌ 無效的期貨代碼，請使用 {', '.join(self._valid_symbols)}"
+                valid_list = [f"{s}({self.get_futures_name(s)})" for s in self._valid_symbols[:10]]
+                return f"❌ 無效的期貨代碼，請使用 {', '.join(valid_list)}"
         
         if not modified:
             return "❌ 無法解析修改內容，請使用格式如「停損改成50點」或「止盈改成100點」"
