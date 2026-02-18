@@ -44,11 +44,11 @@ python main.py --config custom.yaml
 
 ### 1.2 多策略管理
 
-系統支援最多3個獨立策略，每個策略具有以下特性：
+系統支援多個獨立策略，每個策略具有以下特性：
 
 | 特性 | 說明 |
 |------|------|
-| 策略 ID | 唯一識別碼 (如 my_rsi) |
+| 策略 ID | 自動生成 (如 MXFA01, TXFZZZ)，格式：期貨代碼+3位隨機字符 |
 | 策略名稱 | 自定義名稱 |
 | 期貨合約 | 綁定特定期貨 (TXF/MXF/EFF) |
 | 策略 Prompt | AI 交易邏輯描述 |
@@ -58,11 +58,18 @@ python main.py --config custom.yaml
 | 止盈點數 | 止盈點數 (0=不啟用) |
 | 啟用狀態 | 啟用/停用 |
 
+#### 策略 ID 系統
+
+- **格式**：`{期貨代碼}{3位隨機字符}`（如 `MXFA01`, `TXFZZZ`, `EFF12X`）
+- **自動生成**：建立策略時自動產生，無需手動指定
+- **同合約互斥**：同一期貨代碼只能有一個啟用的策略
+- **自動停用**：啟用新版本時，自動停用同代碼的舊版本
+
 ### 1.3 策略版本管理
 
 | 功能 | 說明 |
 |------|------|
-| 程式碼儲存 | 策略程式碼儲存於 strategies.json |
+| 程式碼儲存 | 策略程式碼儲存於 per-strategy JSON 檔案 |
 | 版本號 | strategy_version 遞增 |
 | Prompt Hash | 檢測策略是否需要重新生成 |
 | 自動更新 | Prompt 變更時自動重新生成 |
@@ -89,13 +96,13 @@ python main.py --config custom.yaml
 
 | Tool 名稱 | 功能 | 參數 |
 |-----------|------|------|
-| `create_strategy` | 建立新策略（手動輸入完整參數） | strategy_id, name, symbol, prompt, timeframe, quantity, stop_loss, take_profit |
+| `create_strategy` | 建立新策略（手動輸入完整參數，ID自動生成） | name, symbol, prompt, timeframe, quantity, stop_loss, take_profit |
 | `create_strategy_by_goal` | **目標驅動建立策略**（自動推斷參數） | goal, symbol |
 | `modify_strategy_params` | 修改待確認的策略參數 | modifications |
 | `confirm_create_strategy` | 確認或取消建立策略 | confirmed |
 | `update_strategy_prompt` | 更新策略描述 | strategy_id, new_prompt |
-| `delete_strategy` | 刪除策略 | strategy_id |
-| `enable_strategy` | 啟用策略 | strategy_id |
+| `delete_strategy` | 刪除策略（同時刪除相關檔案） | strategy_id |
+| `enable_strategy` | 啟用策略（同代碼舊版本自動停用） | strategy_id |
 | `disable_strategy` | 停用策略 | strategy_id |
 
 #### 參數驗證
@@ -104,7 +111,6 @@ python main.py --config custom.yaml
 
 | 參數 | 驗證規則 |
 |------|---------|
-| strategy_id | 不可為空，不能與現有策略重複 |
 | name | 不可為空 |
 | symbol | 不可為空 (如 TXF, MXF, EFF) |
 | prompt | 不可為空 |
@@ -112,6 +118,8 @@ python main.py --config custom.yaml
 | quantity | 必須 >= 1 |
 | stop_loss | 必須 >= 0 (0=不啟用) |
 | take_profit | 必須 >= 0 (0=不啟用) |
+
+**注意**：策略 ID 為自動生成，無需手動提供。
 
 ### 2.2 目標驅動策略建立
 
@@ -385,68 +393,49 @@ telegram:
 ### 7.3 策略參數
 
 ```yaml
-strategies:
-  - id: "strategy_001"
-    name: "台指 RSI 策略"
-    symbol: "TXF"
-    enabled: true
-    prompt: "RSI 低於 30 買入，高於 70 賣出"
-    params:
-      timeframe: "15m"
-      stop_loss: 50
-      take_profit: 100
-      position_size: 2
+# 策略為選填，若有需要可在此設定
+strategies: []  # 系統不從這裡載入策略，改用 Telegram 對話建立
 ```
+
+**注意**：系統採用對話式策略建立，策略 ID 會自動生成（如 MXFA01）。
 
 ---
 
 ## 8. 資料儲存
 
-### 8.1 strategies.json
+### 8.1 Per-Strategy 儲存結構
 
-存放3個策略的配置：
-- 策略 ID
-- 名稱
-- 期貨合約代碼
-- Prompt 描述
-- **LLM 生成的程式碼**
-- 啟用狀態
-- 參數設定
+系統採用 per-strategy + versioning 檔案結構：
 
-### 8.2 positions.json
+```
+workspace/
+├── strategies/           # 策略（per-strategy + versioning）
+│   ├── MXFA01_v1.json    # 策略 ID：期貨代碼 + 3位隨機字符
+│   ├── MXFA01_v2.json
+│   └── ...
+├── positions/           # 部位（per-strategy）
+│   ├── MXFA01_positions.json
+│   └── ...
+├── orders/             # 訂單（per-strategy）
+│   ├── MXFA01_orders.json
+│   └── ...
+├── signals/            # 訊號（per-strategy + versioning）
+│   ├── MXFA01_v1.json
+│   ├── MXFA01_v2.json
+│   └── ...
+└── performance.json
+```
 
-存放所有部位記錄：
-- 策略 ID (關聯)
-- 策略名稱
-- 合約代碼
-- 方向 (Buy/Sell)
-- 數量
-- 進場價
-- 現價
-- 損益
-- 停損/止盈價
+### 8.2 刪除策略
 
-### 8.3 orders.json
+刪除策略時會同時刪除以下檔案：
 
-存放所有訂單記錄：
-- 訂單 ID
-- 策略 ID (關聯)
-- 合約代碼
-- 動作
-- 數量
-- 價格
-- 狀態
-- 時間戳
-
-### 8.4 performance.json
-
-存放績效統計：
-- 日期
-- 策略 ID
-- 總交易次數
-- 獲利/虧損次數
-- 勝率
-- 總損益
+| 檔案類型 | 位置 |
+|----------|------|
+| 策略 | `workspace/strategies/{id}_v*.json` |
+| 部位 | `workspace/positions/{id}_positions.json` |
+| 訂單 | `workspace/orders/{id}_orders.json` |
+| 訊號 | `workspace/signals/{id}_v*.json` |
 
 ---
 
@@ -514,19 +503,9 @@ strategies:
 #### config.yaml 範例
 
 ```yaml
-strategies:
-  - id: "strategy_001"
-    name: "每日收益策略"
-    symbol: "TXF"
-    goal: 500              # 目標：每日賺 500 元
-    goal_unit: "daily"
-    prompt: "RSI 低於 30 買入，高於 70 賣出"
-    enabled: true
-    params:
-      timeframe: "15m"
-      stop_loss: 50
-      take_profit: 100
-      position_size: 1
+# 系統採用對話式策略建立，config.yaml 中的 strategies 欄位已移除
+# 策略目標透過 Telegram 命令設定：goal <ID> <金額> <單位>
+# 例如：goal MXFA01 500 daily
 ```
 
 ### 11.3 訊號記錄系統
@@ -556,20 +535,20 @@ strategies:
 ```
 workspace/
 ├── strategies/           # 策略（per-strategy + versioning）
-│   ├── strategy_001_v1.json
-│   ├── strategy_001_v2.json
+│   ├── MXFA01_v1.json
+│   ├── MXFA01_v2.json
 │   └── ...
 ├── positions/          # 部位（per-strategy）
-│   ├── strategy_001_positions.json
-│   ├── strategy_002_positions.json
+│   ├── MXFA01_positions.json
+│   ├── TXF01_positions.json
 │   └── ...
 ├── orders/             # 訂單（per-strategy）
-│   ├── strategy_001_orders.json
-│   ├── strategy_002_orders.json
+│   ├── MXFA01_orders.json
+│   ├── TXF01_orders.json
 │   └── ...
 ├── signals/            # 訊號（per-strategy + versioning）
-│   ├── strategy_001_v1.json
-│   ├── strategy_001_v2.json
+│   ├── MXFA01_v1.json
+│   ├── MXFA01_v2.json
 │   └── ...
 └── performance.json
 ```
@@ -579,6 +558,7 @@ workspace/
 - 策略版本更新時，舊版本資料保留供參考
 - 查詢特定策略時效率更高
 - LLM Review 只分析最新版本的表現
+- 策略 ID 自動生成，格式清晰
 
 #### 版本遞增時機
 
@@ -593,7 +573,7 @@ workspace/
 
 ```json
 {
-    "strategy_id": "strategy_001",
+    "strategy_id": "MXFA01",
     "strategy_version": 2,
     "signal_id": "sig_abc123...",
     ...
@@ -618,11 +598,11 @@ workspace/
 LLM Review 和績效查詢預設分析**最新版本**的訊號，確保分析結果反映當前策略的實際表現。
 
 ```
-performance strategy_001 month
-→ 分析 strategy_001_v2.json (最新版本)
+performance MXFA01 month
+→ 分析 MXFA01_v2.json (最新版本)
 
-review strategy_001
-→ 分析 strategy_001_v2.json (最新版本)
+review MXFA01
+→ 分析 MXFA01_v2.json (最新版本)
 ```
 
 #### 目標達成判斷
@@ -795,15 +775,12 @@ Strategy Execution
 auto_review:
   enabled: true
   schedules:
-    - strategy_id: "strategy_001"
+    - strategy_id: "MXFA01"
       period: 5
       unit: "day"      # 每 5 天觸發一次
-    - strategy_id: "strategy_002"
+    - strategy_id: "TXF001"
       period: 2
       unit: "week"    # 每 2 週觸發一次
-    - strategy_id: "strategy_003"
-      period: 1
-      unit: "month"   # 每月觸發一次
 ```
 
 #### 設定參數
@@ -812,7 +789,7 @@ auto_review:
 |------|------|
 | `enabled` | 是否啟用自動 review |
 | `schedules` | 排程列表 |
-| `strategy_id` | 策略 ID |
+| `strategy_id` | 策略 ID (如 MXFA01) |
 | `period` | 週期數字 |
 | `unit` | 單位 (day/week/month/quarter/year) |
 
@@ -859,10 +836,10 @@ auto_review:
 ```json
 {
   "last_review_times": {
-    "strategy_001": "2026-02-18T10:30:00"
+    "MXFA01": "2026-02-18T10:30:00"
   },
   "last_trigger_date": {
-    "strategy_001": "2026-02-18"
+    "MXFA01": "2026-02-18"
   }
 }
 ```

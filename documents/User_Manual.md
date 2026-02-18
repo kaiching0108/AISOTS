@@ -119,16 +119,8 @@ risk:
   max_position: 10
   max_orders_per_minute: 5
 
-strategies:
-  - id: "strategy_001"
-    name: "台指 RSI 策略"
-    symbol: "TXF"
-    enabled: true
-    prompt: "RSI 低於 30 買入，高於 70 賣出"
-    params:
-      position_size: 2
-      stop_loss: 50
-      take_profit: 100
+# 策略透過 Telegram 對話建立，不在此處設定
+# strategies: []
 ```
 
 ### 2.3 啟動系統
@@ -242,14 +234,12 @@ python main.py --config custom.yaml
 
 ### 3.5 策略配置
 
-```yaml
-strategies:
-  - id: "strategy_001"          # 策略 ID (唯一)
-    name: "台指 RSI 策略"        # 策略名稱
-    symbol: "TXF"               # 期貨代碼
-    goal: 500                   # 目標數值 (可選)
-    goal_unit: "daily"          # 目標單位: daily/weekly/monthly/quarterly/yearly
-    enabled: true               # 是否啟用
+**注意**：系統已改為對話式策略建立，config.yaml 中的 strategies 欄位已移除。
+
+策略透過 Telegram 對話建立：
+- 用戶：「幫我設計一個每日賺500元的策略」
+- 系統詢問期貨代碼
+- 用戶確認後策略建立，ID 自動生成（如 MXFA01）
     prompt: |                   # 交易邏輯描述 (自然語言)
       RSI 低於 30 買入，高於 70 賣出
     params:
@@ -414,16 +404,13 @@ K線週期: 15m
 
 ### 4.3 撰寫策略 Prompt
 
-在 `config.yaml` 的 `prompt` 欄位中撰寫您的交易策略：
+策略透過 Telegram 對話建立，Prompt 由 LLM 根據用戶目標自動生成：
 
-```yaml
-strategies:
-  - id: "strategy_001"
-    name: "我的策略"
-    symbol: "TXF"
-    prompt: |
-      這裡撰寫您的策略描述
-```
+1. 輸入：「幫我設計一個 RSI 策略」或「每日賺500元」
+2. 系統詢問期貨代碼
+3. 系統自動推斷參數並生成策略描述
+4. 用戶可修改參數
+5. 確認後建立策略，ID 自動生成（如 `MXFA01`）
 
 ### 4.4 策略 Prompt 範例
 
@@ -536,7 +523,7 @@ self.ta('STOCH', period=14)
 📋 策略列表
 
 *台指 RSI 策略*
-  ID: strategy_001
+  ID: MXFA01
   合約: TXF
   狀態: ✅ 啟用
   策略類別: RSIStrategy
@@ -552,26 +539,26 @@ self.ta('STOCH', period=14)
 #### 啟用策略
 
 ```
-輸入: enable strategy_001
+輸入: enable MXFA01
 ```
 
 #### 停用策略
 
 ```
-輸入: disable strategy_001
+輸入: disable MXFA01
 ```
 
 #### 查看策略狀態
 
 ```
-輸入: status strategy_001
+輸入: status MXFA01
 ```
 
 回覆：
 ```
 📊 策略狀態
 
-ID: strategy_001
+ID: MXFA01
 名稱: 台指 RSI 策略
 合約: TXF
 狀態: 執行中
@@ -653,30 +640,30 @@ ID: strategy_001
 | `performance` | 整體當日績效 | performance |
 | `risk` | 風控狀態 | risk |
 | `orders` | 訂單歷史 | orders |
-| `enable <id>` | 啟用策略 | enable strategy_001 |
-| `disable <id>` | 停用策略 | disable strategy_001 |
+| `enable <id>` | 啟用策略 | enable MXFA01 |
+| `disable <id>` | 停用策略 | disable MXFA01 |
 | `price <symbol>` | 查詢報價 | price TXF |
-| `status <id>` | 策略狀態 | status strategy_001 |
+| `status <id>` | 策略狀態 | status MXFA01 |
 
 ### 6.2 績效分析命令
 
 | 命令 | 說明 | 範例 |
 |------|------|------|
-| `performance <ID>` | 查詢策略全部歷史績效 | performance strategy_001 |
-| `performance <ID> today` | 查詢策略今日績效 | performance strategy_001 today |
-| `performance <ID> week` | 查詢策略本週績效 | performance strategy_001 week |
-| `performance <ID> month` | 查詢策略本月績效 | performance strategy_001 month |
-| `performance <ID> quarter` | 查詢策略本季績效 | performance strategy_001 quarter |
-| `performance <ID> year` | 查詢策略本年績效 | performance strategy_001 year |
-| `performance <ID> <begin> <end>` | 自訂日期範圍 | performance strategy_001 2025-01-01 2025-01-31 |
+| `performance <ID>` | 查詢策略全部歷史績效 | performance MXFA01 |
+| `performance <ID> today` | 查詢策略今日績效 | performance MXFA01 today |
+| `performance <ID> week` | 查詢策略本週績效 | performance MXFA01 week |
+| `performance <ID> month` | 查詢策略本月績效 | performance MXFA01 month |
+| `performance <ID> quarter` | 查詢策略本季績效 | performance MXFA01 quarter |
+| `performance <ID> year` | 查詢策略本年績效 | performance MXFA01 year |
+| `performance <ID> <begin> <end>` | 自訂日期範圍 | performance MXFA01 2025-01-01 2025-01-31 |
 
 ### 6.3 自我優化命令
 
 | 命令 | 說明 | 範例 |
 |------|------|------|
-| `goal <ID> <金額> <單位>` | 設定策略目標 | goal strategy_001 500 daily |
-| `review <ID>` | LLM 審查策略並給出修改建議 | review strategy_001 |
-| `optimize <ID>` | 執行完整優化流程 | optimize strategy_001 |
+| `goal <ID> <金額> <單位>` | 設定策略目標 | goal MXFA01 500 daily |
+| `review <ID>` | LLM 審查策略並給出修改建議 | review MXFA01 |
+| `optimize <ID>` | 執行完整優化流程 | optimize MXFA01 |
 | `confirm optimize` | 確認執行優化修改 | confirm optimize |
 | `確認優化` | 確認執行優化修改 | 確認優化 |
 
@@ -693,21 +680,21 @@ goal <策略ID> <目標金額> <目標單位>
 - yearly  (每年)
 
 範例:
-goal strategy_001 500 daily      # 每日賺500元
-goal strategy_001 3000 weekly    # 每週賺3000元
-goal strategy_001 10000 monthly  # 每月賺10000元
+goal MXFA01 500 daily      # 每日賺500元
+goal MXFA01 3000 weekly    # 每週賺3000元
+goal MXFA01 10000 monthly  # 每月賺10000元
 ```
 
 ### 6.5 完整優化流程
 
 ```
 1. 設定目標:
-   goal strategy_001 500 daily
+   goal MXFA01 500 daily
 
 2. 執行策略交易一段時間
 
 3. 開始優化:
-   optimize strategy_001
+   optimize MXFA01
    → 系統分析目標達成情況
    → 若未達成，自動觸發 LLM 審查
 
@@ -721,8 +708,8 @@ goal strategy_001 10000 monthly  # 每月賺10000元
 ### 6.6 績效查詢範例
 
 ```
-用戶: performance strategy_001 month
-Bot: 📈 策略績效: strategy_001 (2025-02-01 ~ 2025-02-18)
+用戶: performance MXFA01 month
+Bot: 📈 策略績效: MXFA01 (2025-02-01 ~ 2025-02-18)
      ─────────────────────────────
      合約: TXF
      
@@ -740,7 +727,7 @@ Bot: 📈 策略績效: strategy_001 (2025-02-01 ~ 2025-02-18)
 ### 6.5 策略審查範例
 
 ```
-用戶: review strategy_001
+用戶: review MXFA01
 Bot: 📊 LLM 策略審查結果
      ─────────────────────────────
      
@@ -772,15 +759,12 @@ Bot: 📊 LLM 策略審查結果
 auto_review:
   enabled: true
   schedules:
-    - strategy_id: "strategy_001"
+    - strategy_id: "MXFA01"
       period: 5
       unit: "day"      # 每 5 天觸發一次
-    - strategy_id: "strategy_002"
+    - strategy_id: "TXF01"
       period: 2
       unit: "week"     # 每 2 週觸發一次
-    - strategy_id: "strategy_003"
-      period: 1
-      unit: "month"   # 每月觸發一次
 ```
 
 #### 參數說明
@@ -795,13 +779,13 @@ auto_review:
 #### 使用範例
 
 ```
-# 每 5 天自動 review strategy_001
-- strategy_id: "strategy_001"
+# 每 5 天自動 review MXFA01
+- strategy_id: "MXFA01"
   period: 5
   unit: "day"
 
-# 每 2 週自動 review strategy_002
-- strategy_id: "strategy_002"
+# 每 2 週自動 review TXF01
+- strategy_id: "TXF01"
   period: 2
   unit: "week"
 
