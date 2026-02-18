@@ -132,3 +132,6 @@ def ensure_workspace() -> None:
     workspace.mkdir(exist_ok=True)
     (workspace / "logs").mkdir(exist_ok=True)
     (workspace / "signals").mkdir(exist_ok=True)
+    (workspace / "strategies").mkdir(exist_ok=True)
+    (workspace / "positions").mkdir(exist_ok=True)
+    (workspace / "orders").mkdir(exist_ok=True)

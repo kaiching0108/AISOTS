@@ -274,27 +274,44 @@ class MyStrategy(TradingStrategy):
 
 ### Database/Storage
 
-The system uses JSON files for persistence in `workspace/`:
+The system uses per-strategy JSON files for persistence in `workspace/`:
 
-| File/Directory | Description |
-|----------------|-------------|
-| `strategies.json` | Strategy configurations (including LLM-generated code) |
-| `positions.json` | Position tracking |
-| `orders.json` | Order history |
-| `signals/` | Versioned signal records (see below) |
-| `performance.json` | Performance data |
+| Directory | Description |
+|-----------|-------------|
+| `strategies/` | Strategy configurations with versioning |
+| `positions/` | Position tracking per strategy |
+| `orders/` | Order history per strategy |
+| `signals/` | Versioned signal records per strategy |
+| `performance.json` | Performance data (global) |
 
-#### Versioned Signal Storage
-
-Signals are stored in versioned files for isolation:
+#### Per-Strategy Storage Structure
 
 ```
-workspace/signals/
-├── strategy_001_v1.json   # v1 signals
-├── strategy_001_v2.json   # v2 signals
-├── strategy_002_v1.json
-└── ...
+workspace/
+├── strategies/           # Strategies with versioning
+│   ├── strategy_001_v1.json
+│   ├── strategy_001_v2.json
+│   └── ...
+├── positions/           # Positions per strategy
+│   ├── strategy_001_positions.json
+│   ├── strategy_002_positions.json
+│   └── ...
+├── orders/             # Orders per strategy
+│   ├── strategy_001_orders.json
+│   ├── strategy_002_orders.json
+│   └── ...
+├── signals/            # Signals with versioning
+│   ├── strategy_001_v1.json
+│   ├── strategy_001_v2.json
+│   └── ...
+└── performance.json
 ```
+
+#### Versioning
+
+- **Strategies**: Version increments on prompt update or optimization
+- **Signals**: Each strategy version has its own signal file
+- **Positions/Orders**: Per-strategy files without versioning
 
 When a strategy is updated (prompt change or optimization), the version increments and new signals are recorded to the new version file.
 

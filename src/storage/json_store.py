@@ -1,7 +1,7 @@
 """JSON 檔案儲存"""
 import json
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, List
 from datetime import datetime
 
 
@@ -30,6 +30,7 @@ class JSONStore:
     def save(self, filename: str, data: Any) -> None:
         """儲存 JSON 檔案"""
         path = self._get_file_path(filename)
+        path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2, default=str)
     
@@ -94,92 +95,251 @@ class JSONStore:
 
 
 class StrategyStore(JSONStore):
-    """策略儲存"""
+    """策略儲存 - per-strategy + versioning"""
     
     def __init__(self, workspace_dir: Path):
         super().__init__(workspace_dir)
-        self.file = "strategies.json"
+        self.strategies_dir = workspace_dir / "strategies"
+        self.strategies_dir.mkdir(exist_ok=True)
     
-    def get_all(self) -> list:
-        return self.load(self.file, [])
+    def _get_strategy_file(self, strategy_id: str, version: int = None) -> Path:
+        """取得策略檔案路徑"""
+        if version is None:
+            version = self._get_latest_version(strategy_id)
+        return self.strategies_dir / f"{strategy_id}_v{version}.json"
     
-    def get_by_id(self, strategy_id: str) -> Optional[dict]:
-        return self.find(self.file, "id", strategy_id)
+    def _get_latest_version(self, strategy_id: str) -> int:
+        """取得策略的最新版本"""
+        files = list(self.strategies_dir.glob(f"{strategy_id}_v*.json"))
+        if not files:
+            return 1
+        versions = []
+        for f in files:
+            try:
+                version = int(f.stem.split("_v")[1])
+                versions.append(version)
+            except (ValueError, IndexError):
+                continue
+        return max(versions) if versions else 1
     
-    def get_enabled(self) -> list:
-        return [s for s in self.get_all() if s.get("enabled", False)]
+    def get_all_versions(self, strategy_id: str) -> List[int]:
+        """取得策略的所有版本"""
+        files = list(self.strategies_dir.glob(f"{strategy_id}_v*.json"))
+        versions = []
+        for f in files:
+            try:
+                version = int(f.stem.split("_v")[1])
+                versions.append(version)
+            except (ValueError, IndexError):
+                continue
+        return sorted(versions)
+    
+    def get_all(self) -> List[dict]:
+        """取得所有策略（相容性方法）"""
+        return self.get_all_strategies()
+    
+    def load_strategy(self, strategy_id: str, version: int = None) -> Optional[dict]:
+        """載入策略"""
+        if version is None:
+            version = self._get_latest_version(strategy_id)
+        path = self._get_strategy_file(strategy_id, version)
+        if path.exists():
+            return self.load(f"strategies/{strategy_id}_v{version}.json")
+        return None
     
     def save_strategy(self, strategy: dict) -> None:
-        strategies = self.get_all()
+        """儲存策略"""
+        strategy_id = strategy.get("id", "")
+        version = strategy.get("strategy_version", 1)
+        filename = f"strategies/{strategy_id}_v{version}.json"
+        strategies = self.load(filename, [])
+        
         for i, s in enumerate(strategies):
-            if s["id"] == strategy["id"]:
+            if s.get("id") == strategy_id:
                 strategies[i] = strategy
                 break
         else:
             strategies.append(strategy)
-        self.save(self.file, strategies)
+        
+        self.save(filename, strategies)
+    
+    def save_strategy_new_version(self, strategy: dict, old_version: int, new_version: int) -> None:
+        """儲存新版本策略"""
+        strategy_id = strategy.get("id", "")
+        old_filename = f"strategies/{strategy_id}_v{old_version}.json"
+        new_filename = f"strategies/{strategy_id}_v{new_version}.json"
+        
+        old_data = self.load(old_filename, [])
+        self.save(old_filename, old_data)
+        
+        self.save(new_filename, [strategy])
+    
+    def get_all_strategies(self) -> List[dict]:
+        """取得所有策略（最新版本）"""
+        all_strategies = {}
+        
+        for f in self.strategies_dir.glob("*.json"):
+            try:
+                parts = f.stem.split("_v")
+                if len(parts) != 2:
+                    continue
+                strategy_id = parts[0]
+                version = int(parts[1])
+                
+                if strategy_id not in all_strategies or version > all_strategies[strategy_id]["version"]:
+                    data = self.load(f"strategies/{f.name}", [])
+                    if data:
+                        all_strategies[strategy_id] = {
+                            "version": version,
+                            "data": data[0] if isinstance(data, list) else data
+                        }
+            except (ValueError, IndexError):
+                continue
+        
+        return [s["data"] for s in all_strategies.values()]
+    
+    def get_enabled_strategies(self) -> List[dict]:
+        """取得啟用的策略"""
+        return [s for s in self.get_all_strategies() if s.get("enabled", False)]
+    
+    def get_by_id(self, strategy_id: str, version: int = None) -> Optional[dict]:
+        """根據 ID 取得策略"""
+        return self.load_strategy(strategy_id, version)
     
     def enable_strategy(self, strategy_id: str) -> bool:
-        return self.update_by_key(self.file, "id", strategy_id, {"enabled": True})
+        """啟用策略"""
+        strategy = self.load_strategy(strategy_id)
+        if strategy:
+            strategy["enabled"] = True
+            self.save_strategy(strategy)
+            return True
+        return False
     
     def disable_strategy(self, strategy_id: str) -> bool:
-        return self.update_by_key(self.file, "id", strategy_id, {"enabled": False})
+        """停用策略"""
+        strategy = self.load_strategy(strategy_id)
+        if strategy:
+            strategy["enabled"] = False
+            self.save_strategy(strategy)
+            return True
+        return False
 
 
 class PositionStore(JSONStore):
-    """部位儲存"""
+    """部位儲存 - per-strategy"""
     
     def __init__(self, workspace_dir: Path):
         super().__init__(workspace_dir)
-        self.file = "positions.json"
+        self.positions_dir = workspace_dir / "positions"
+        self.positions_dir.mkdir(exist_ok=True)
     
-    def get_all(self) -> list:
-        return self.load(self.file, [])
+    def _get_position_file(self, strategy_id: str) -> Path:
+        return self.positions_dir / f"{strategy_id}_positions.json"
     
-    def get_by_strategy(self, strategy_id: str) -> list:
-        return self.find_all(self.file, "strategy_id", strategy_id)
+    def get_all_positions(self) -> List[dict]:
+        """取得所有策略的最新部位"""
+        all_positions = []
+        for f in self.positions_dir.glob("*_positions.json"):
+            data = self.load(f"positions/{f.name}", [])
+            if data and isinstance(data, list):
+                all_positions.extend(data)
+        return all_positions
+    
+    def get_by_strategy(self, strategy_id: str) -> List[dict]:
+        """取得特定策略的部位"""
+        return self.load(f"positions/{strategy_id}_positions.json", [])
     
     def get_open_positions(self) -> list:
-        return [p for p in self.get_all() if p.get("quantity", 0) > 0]
+        """取得所有未平倉部位"""
+        all_pos = self.get_all_positions()
+        return [p for p in all_pos if p.get("quantity", 0) > 0]
     
     def add_position(self, position: dict) -> None:
-        self.append(self.file, position)
+        """新增部位"""
+        strategy_id = position.get("strategy_id", "")
+        filename = f"positions/{strategy_id}_positions.json"
+        positions = self.load(filename, [])
+        positions.append(position)
+        self.save(filename, positions)
     
     def close_position(self, strategy_id: str) -> bool:
-        return self.update_by_key(
-            self.file, "strategy_id", strategy_id,
-            {"quantity": 0, "closed_at": datetime.now().isoformat()}
-        )
+        """平倉"""
+        positions = self.get_by_strategy(strategy_id)
+        for i, p in enumerate(positions):
+            if p.get("quantity", 0) > 0:
+                p["quantity"] = 0
+                p["closed_at"] = datetime.now().isoformat()
+                positions[i] = p
+                self.save(f"positions/{strategy_id}_positions.json", positions)
+                return True
+        return False
     
     def update_position(self, strategy_id: str, updates: dict) -> bool:
-        return self.update_by_key(self.file, "strategy_id", strategy_id, updates)
+        """更新部位"""
+        positions = self.get_by_strategy(strategy_id)
+        for i, p in enumerate(positions):
+            if p.get("quantity", 0) > 0:
+                positions[i].update(updates)
+                positions[i]["updated_at"] = datetime.now().isoformat()
+                self.save(f"positions/{strategy_id}_positions.json", positions)
+                return True
+        return False
 
 
 class OrderStore(JSONStore):
-    """訂單儲存"""
+    """訂單儲存 - per-strategy"""
     
     def __init__(self, workspace_dir: Path):
         super().__init__(workspace_dir)
-        self.file = "orders.json"
+        self.orders_dir = workspace_dir / "orders"
+        self.orders_dir.mkdir(exist_ok=True)
     
-    def get_all(self) -> list:
-        return self.load(self.file, [])
+    def _get_order_file(self, strategy_id: str) -> Path:
+        return self.orders_dir / f"{strategy_id}_orders.json"
     
-    def get_by_strategy(self, strategy_id: str) -> list:
-        return self.find_all(self.file, "strategy_id", strategy_id)
+    def get_all_orders(self) -> List[dict]:
+        """取得所有訂單"""
+        all_orders = []
+        for f in self.orders_dir.glob("*_orders.json"):
+            data = self.load(f"orders/{f.name}", [])
+            if data and isinstance(data, list):
+                all_orders.extend(data)
+        return all_orders
     
-    def get_by_date(self, date: str) -> list:
-        return self.find_all(self.file, "date", date)
+    def get_by_strategy(self, strategy_id: str) -> List[dict]:
+        """取得特定策略的訂單"""
+        return self.load(f"orders/{strategy_id}_orders.json", [])
+    
+    def get_today_orders(self) -> List[dict]:
+        """取得今日訂單"""
+        today = datetime.now().strftime("%Y-%m-%d")
+        all_orders = self.get_all_orders()
+        return [o for o in all_orders if today in o.get("timestamp", "")]
     
     def add_order(self, order: dict) -> None:
-        self.append(self.file, order)
+        """新增訂單"""
+        strategy_id = order.get("strategy_id", "")
+        filename = f"orders/{strategy_id}_orders.json"
+        orders = self.load(filename, [])
+        orders.append(order)
+        self.save(filename, orders)
     
     def update_order_status(self, order_id: str, status: str, filled_price: float = None) -> bool:
-        updates = {"status": status}
-        if filled_price:
-            updates["filled_price"] = filled_price
-            updates["filled_time"] = datetime.now().isoformat()
-        return self.update_by_key(self.file, "order_id", order_id, updates)
+        """更新訂單狀態"""
+        all_orders = self.get_all_orders()
+        
+        for o in all_orders:
+            if o.get("order_id") == order_id:
+                o["status"] = status
+                if filled_price:
+                    o["filled_price"] = filled_price
+                    o["filled_time"] = datetime.now().isoformat()
+                
+                strategy_id = o.get("strategy_id", "")
+                self.save(f"orders/{strategy_id}_orders.json", 
+                         [x for x in self.get_by_strategy(strategy_id) if x.get("order_id") != order_id] + [o])
+                return True
+        return False
 
 
 class PerformanceStore(JSONStore):

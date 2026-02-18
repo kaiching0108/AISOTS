@@ -522,20 +522,33 @@ strategies:
 
 #### 版本化儲存
 
-系統採用版本化檔案結構，每個策略的每個版本獨立儲存：
+系統採用 per-strategy + versioned 檔案結構：
 
 ```
 workspace/
-└── signals/
-    ├── strategy_001_v1.json   # v1 版本訊號
-    ├── strategy_001_v2.json   # v2 版本訊號
-    ├── strategy_002_v1.json   # v2 版本訊號
-    └── ...
+├── strategies/           # 策略（per-strategy + versioning）
+│   ├── strategy_001_v1.json
+│   ├── strategy_001_v2.json
+│   └── ...
+├── positions/          # 部位（per-strategy）
+│   ├── strategy_001_positions.json
+│   ├── strategy_002_positions.json
+│   └── ...
+├── orders/             # 訂單（per-strategy）
+│   ├── strategy_001_orders.json
+│   ├── strategy_002_orders.json
+│   └── ...
+├── signals/            # 訊號（per-strategy + versioning）
+│   ├── strategy_001_v1.json
+│   ├── strategy_001_v2.json
+│   └── ...
+└── performance.json
 ```
 
 **優點**：
-- 不同版本的訊號完全隔離
-- 策略優化後，舊版本資料保留供參考
+- 每個策略的資料完全隔離
+- 策略版本更新時，舊版本資料保留供參考
+- 查詢特定策略時效率更高
 - LLM Review 只分析最新版本的表現
 
 #### 版本遞增時機
@@ -953,3 +966,4 @@ auto_review:
 | 3.2.0 | 2026-02 | 新增自我優化系統 - 半自動優化循環 |
 | 3.3.0 | 2026-02 | 新增自動 LLM Review 排程功能 |
 | 3.4.0 | 2026-02 | 新增版本化訊號儲存，策略更新時自動遞增版本 |
+| 3.5.0 | 2026-02 | 重構儲存系統，採用 per-strategy 結構 |
