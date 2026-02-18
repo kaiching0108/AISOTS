@@ -213,7 +213,29 @@ K線週期: {strategy.params.get('timeframe', 'N/A')}
         success = self.strategy_mgr.enable_strategy(strategy_id)
         
         if success:
-            result = f"✅ 策略已啟用: {strategy_id}"
+            params = strategy.params or {}
+            timeframe = params.get("timeframe", "未知")
+            quantity = params.get("quantity", 1)
+            stop_loss = params.get("stop_loss", 0)
+            
+            result = f"""✅ *{strategy_id} 策略已啟動！*
+────────────────────
+📌 策略名稱：{strategy.name}
+📌 期貨代碼：{strategy.symbol}（{self.get_futures_name(strategy.symbol)}）
+📌 K線週期：{timeframe}
+📌 交易口數：{quantity}口
+📌 停損：{stop_loss}點
+
+⏰ 系統將在交易時間內自動執行交易
+
+📊 可用指令：
+• `status {strategy_id}` - 查看策略狀態
+• `positions` - 查看目前部位
+• `performance` - 查看當日績效
+• `disable {strategy_id}` - 停用策略
+
+────────────────────
+✅ 策略已啟動完成，無需其他操作！"""
             if disabled:
                 result += f"\n\n⚠️ 已自動停用以下舊版本：\n" + "\n".join(f"  - {d}" for d in disabled)
             return result
