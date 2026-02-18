@@ -124,7 +124,8 @@ class TradingTools:
             # 策略名稱和狀態
             text += f"{status} {s.name}\n"
             text += f"• ID: {s.id}\n"
-            text += f"• 期貨代碼: {s.symbol}\n"
+            text += f"• 期貨代碼: {s.symbol}（{self.get_futures_name(s.symbol)}）\n"
+            text += f"• 版本: v{s.strategy_version}\n"
             
             # 策略描述（prompt）
             if s.prompt:
