@@ -422,7 +422,11 @@ class TelegramBot:
 
         try:
             result = await self.command_handler(user_text)
-            await message.reply_text(result, parse_mode="Markdown")
+            try:
+                await message.reply_text(result, parse_mode="Markdown")
+            except Exception as e:
+                logger.warning(f"Markdown 解析失敗，嘗試發送純文字: {e}")
+                await message.reply_text(result, parse_mode=None)
         except Exception as e:
             logger.error(f"處理命令失敗: {e}")
             await message.reply_text(f"❌ 處理命令時發生錯誤: {e}")
