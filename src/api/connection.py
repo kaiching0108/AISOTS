@@ -1,9 +1,8 @@
 """連線管理與斷線處理"""
 import time
-import logging
 from typing import Callable, Optional
 
-logger = logging.getLogger(__name__)
+from src.logger import logger
 
 
 class ConnectionManager:

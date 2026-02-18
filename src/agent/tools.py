@@ -1,14 +1,12 @@
 """AI Agent 交易工具 - 對應 Nanobot Tool 概念"""
 import random
 from typing import Any, Dict, Optional
-import logging
 from datetime import datetime
+from src.logger import logger
 from src.trading.strategy_manager import StrategyManager
 from src.trading.position_manager import PositionManager
 from src.trading.order_manager import OrderManager
 from src.risk.risk_manager import RiskManager
-
-logger = logging.getLogger(__name__)
 
 
 class TradingTools:

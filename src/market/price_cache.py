@@ -1,10 +1,9 @@
 """價格快取模組"""
-import logging
 from typing import Dict, Optional, List, Any
 from datetime import datetime
 from collections import deque
 
-logger = logging.getLogger(__name__)
+from src.logger import logger
 
 
 class PriceData:

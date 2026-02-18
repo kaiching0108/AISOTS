@@ -3,9 +3,8 @@ import shioaji as sj
 from shioaji.constant import Action, FuturesPriceType, OrderType, FuturesOCType
 from typing import Optional, List, Dict, Any
 from datetime import datetime
-import logging
 
-logger = logging.getLogger(__name__)
+from src.logger import logger
 
 
 class ShioajiClient:

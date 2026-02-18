@@ -1,9 +1,8 @@
 """風控管理器"""
 from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
-import logging
 
-logger = logging.getLogger(__name__)
+from src.logger import logger
 
 
 class RiskManager:

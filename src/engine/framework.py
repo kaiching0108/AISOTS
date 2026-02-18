@@ -3,9 +3,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional, Dict, Any, List
-import logging
 
-logger = logging.getLogger(__name__)
+from src.logger import logger
 
 SIGNAL_BUY = "buy"
 SIGNAL_SELL = "sell"

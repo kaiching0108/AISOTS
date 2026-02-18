@@ -1,16 +1,15 @@
 """Telegram 通知與 Bot"""
 import re
 import asyncio
-import logging
 import requests
 from typing import Optional, Dict, Any
 from datetime import datetime
 
 from telegram import BotCommand, Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from telegram.request import HTTPXRequest
 
-logger = logging.getLogger(__name__)
+from src.logger import logger
+from telegram.request import HTTPXRequest
 
 
 class TelegramNotifier:

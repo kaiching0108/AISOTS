@@ -1,13 +1,11 @@
 """下單管理器"""
 from typing import List, Optional, Dict, Any, Callable
 from pathlib import Path
-import logging
 from datetime import datetime, timedelta
 
+from src.logger import logger
 from src.trading.order import Order
 from src.storage.json_store import OrderStore
-
-logger = logging.getLogger(__name__)
 
 
 class OrderManager:

@@ -1,11 +1,10 @@
 """規則引擎 - 根據解析後的規則產生交易訊號"""
-import logging
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 import numpy as np
 import pandas as pd
 
-logger = logging.getLogger(__name__)
+from src.logger import logger
 
 Signal = str
 SIGNAL_BUY = "buy"

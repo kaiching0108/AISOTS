@@ -1,10 +1,10 @@
 """策略執行器 - 協調策略執行"""
 import asyncio
-import logging
 from typing import Dict, Any, Optional, Callable, List
 from datetime import datetime
 from pathlib import Path
 
+from src.logger import logger
 from src.trading.strategy import Strategy
 from src.trading.strategy_manager import StrategyManager
 from src.trading.position_manager import PositionManager
@@ -14,8 +14,6 @@ from src.engine.framework import StrategyExecutor, BarData, TradingStrategy
 from src.engine.rule_engine import MarketData, SIGNAL_HOLD
 from src.engine.llm_generator import LLMGenerator
 from src.risk.risk_manager import RiskManager
-
-logger = logging.getLogger(__name__)
 
 
 class StrategyRunner:

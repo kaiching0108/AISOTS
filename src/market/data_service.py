@@ -1,13 +1,11 @@
 """市場數據服務"""
 import asyncio
-import logging
 from typing import Dict, Set, Optional, Callable, List, Any
 from datetime import datetime
 
+from src.logger import logger
 from src.market.price_cache import PriceCache, PriceData
 from src.api.shioaji_client import ShioajiClient
-
-logger = logging.getLogger(__name__)
 
 
 class MarketDataService:

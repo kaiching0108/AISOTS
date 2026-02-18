@@ -1,10 +1,9 @@
 """規則解析器 - 使用 LLM 將策略提示轉換為 JSON 規則"""
 import json
-import logging
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 
-logger = logging.getLogger(__name__)
+from src.logger import logger
 
 RULE_PARSER_PROMPT = """你是一個期貨交易策略規則解析器。你的任務是將用戶的策略描述轉換為結構化的 JSON 規則。
 

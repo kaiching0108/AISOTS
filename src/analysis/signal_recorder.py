@@ -4,9 +4,8 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any, List
-import logging
 
-logger = logging.getLogger(__name__)
+from src.logger import logger
 
 
 class SignalRecorder:

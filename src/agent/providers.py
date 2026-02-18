@@ -1,12 +1,11 @@
 """LLM Provider 實現 - 支援多種 LLM 服務"""
 import os
 import json
-import logging
 from abc import ABC, abstractmethod
 from typing import Optional, Any, Dict, List
 import httpx
 
-logger = logging.getLogger(__name__)
+from src.logger import logger
 
 
 class BaseProvider(ABC):

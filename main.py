@@ -1,6 +1,5 @@
 """AI 期貨交易系統 - 主程式"""
 import asyncio
-import logging
 import sys
 import argparse
 from pathlib import Path
@@ -10,6 +9,7 @@ import signal
 # 添加專案根目錄到 Python 路徑
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from src.logger import logger
 from src.config import load_config, ensure_workspace, get_workspace_dir
 from src.api import ShioajiClient, ConnectionManager, OrderCallbackHandler
 from src.trading import StrategyManager, PositionManager, OrderManager
@@ -30,10 +30,7 @@ class AITradingSystem:
         # 確保工作目錄存在
         ensure_workspace()
         
-        # 初始化日誌
-        self._setup_logging()
-        
-        self.logger = logging.getLogger(__name__)
+        self.logger = logger
         
         # 初始化各模組
         workspace = get_workspace_dir()
@@ -150,18 +147,6 @@ class AITradingSystem:
                 price=0
             )
             self.notifier.send_message(result)
-    
-    def _setup_logging(self) -> None:
-        """設定日誌"""
-        log_config = self.config.logging
-        logging.basicConfig(
-            level=getattr(logging, log_config.level),
-            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-            handlers=[
-                logging.FileHandler(log_config.file),
-                logging.StreamHandler()
-            ]
-        )
     
     async def initialize(self) -> bool:
         """初始化系統"""

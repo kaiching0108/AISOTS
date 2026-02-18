@@ -1,9 +1,8 @@
 """LLM 策略生成器 - 將用戶描述轉換為策略程式碼"""
-import logging
 from typing import Optional, Dict, Any
 import re
 
-logger = logging.getLogger(__name__)
+from src.logger import logger
 
 STRATEGY_GENERATOR_PROMPT = """
 你是一個期貨策略生成器。請根據用戶的策略描述，生成可在框架中執行的策略類別。

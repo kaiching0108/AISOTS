@@ -1,12 +1,10 @@
 """策略管理器"""
 from typing import List, Optional, Dict, Any
 from pathlib import Path
-import logging
 
+from src.logger import logger
 from src.trading.strategy import Strategy
 from src.storage.json_store import StrategyStore
-
-logger = logging.getLogger(__name__)
 
 
 class StrategyManager:

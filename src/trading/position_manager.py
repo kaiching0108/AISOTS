@@ -1,13 +1,11 @@
 """部位管理器"""
 from typing import List, Optional, Dict, Any
 from pathlib import Path
-import logging
 from datetime import datetime
 
+from src.logger import logger
 from src.trading.position import Position
 from src.storage.json_store import PositionStore
-
-logger = logging.getLogger(__name__)
 
 
 class PositionManager:

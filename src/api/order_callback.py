@@ -1,9 +1,8 @@
 """訂單回調處理"""
-import logging
 from typing import Callable, Dict, Any, Optional
 from datetime import datetime
 
-logger = logging.getLogger(__name__)
+from src.logger import logger
 
 
 class OrderCallbackHandler:
