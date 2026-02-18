@@ -16,7 +16,9 @@ class Position:
         quantity: int,
         entry_price: float,
         stop_loss: Optional[float] = None,
-        take_profit: Optional[float] = None
+        take_profit: Optional[float] = None,
+        signal_id: Optional[str] = None,
+        strategy_version: int = 1
     ):
         self.strategy_id = strategy_id
         self.strategy_name = strategy_name
@@ -28,6 +30,9 @@ class Position:
         
         self.stop_loss = stop_loss
         self.take_profit = take_profit
+        
+        self.signal_id = signal_id
+        self.strategy_version = strategy_version
         
         self.current_price = entry_price
         self.pnl = 0.0
@@ -79,7 +84,9 @@ class Position:
             "current_price": self.current_price,
             "pnl": self.pnl,
             "stop_loss": self.stop_loss,
-            "take_profit": self.take_profit
+            "take_profit": self.take_profit,
+            "signal_id": self.signal_id,
+            "strategy_version": self.strategy_version
         }
     
     @classmethod
@@ -93,7 +100,9 @@ class Position:
             quantity=data.get("quantity", 0),
             entry_price=data.get("entry_price", 0),
             stop_loss=data.get("stop_loss"),
-            take_profit=data.get("take_profit")
+            take_profit=data.get("take_profit"),
+            signal_id=data.get("signal_id"),
+            strategy_version=data.get("strategy_version", 1)
         )
         position.entry_time = data.get("entry_time", position.entry_time)
         position.current_price = data.get("current_price", position.entry_price)

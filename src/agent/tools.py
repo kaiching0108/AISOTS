@@ -38,6 +38,24 @@ class TradingTools:
         self._current_goal: Optional[str] = None
         
         self._pending_optimization: Optional[Dict[str, Any]] = None
+        
+        self._signal_recorder = None
+        self._performance_analyzer = None
+    
+    def _get_signal_recorder(self):
+        """取得訊號記錄器（lazy loading）"""
+        if self._signal_recorder is None:
+            from src.analysis.signal_recorder import SignalRecorder
+            workspace = self.strategy_mgr.workspace_dir
+            self._signal_recorder = SignalRecorder(workspace)
+        return self._signal_recorder
+    
+    def _get_performance_analyzer(self):
+        """取得績效分析器（lazy loading）"""
+        if self._performance_analyzer is None:
+            from src.analysis.performance_analyzer import PerformanceAnalyzer
+            self._performance_analyzer = PerformanceAnalyzer(self._get_signal_recorder())
+        return self._performance_analyzer
     
     # ========== 策略工具 ==========
     
@@ -265,20 +283,33 @@ ID: {strategy_id}
         
         # 記錄舊 prompt
         old_prompt = strategy.prompt
+        old_version = strategy.strategy_version
         
-        # 更新 prompt
+        # 更新 prompt 並遞增版本
         strategy.prompt = new_prompt
+        strategy.strategy_version = old_version + 1
+        
+        # 歸檔舊版本訊號，建立新版本
+        self._get_signal_recorder().archive_to_new_version(
+            strategy_id=strategy_id,
+            old_version=old_version,
+            new_version=strategy.strategy_version
+        )
+        
         self.strategy_mgr.store.save_strategy(strategy.to_dict())
         
         return f"""
 ✅ *策略已更新*
-─────────────
+────────────
 ID: {strategy_id}
 名稱: {strategy.name}
+舊版本: v{old_version}
+新版本: v{strategy.strategy_version}
 舊描述: {old_prompt}
 新描述: {new_prompt}
 
-策略程式碼將自動重新生成 (v{strategy.strategy_version + 1})
+策略程式碼將自動重新生成
+新版本訊號將記錄到 v{strategy.strategy_version}.json
 """
     
     def delete_strategy_tool(self, strategy_id: str) -> str:
@@ -692,6 +723,15 @@ K線週期: {params['timeframe']}
                     filled_price = contract.last_price
             
             # 建立部位（帶入停損止盈點數）
+            signal_action = "buy" if action == "Buy" else "sell"
+            signal_id = self._get_signal_recorder().record_signal(
+                strategy_id=strategy_id,
+                strategy_version=strategy.strategy_version,
+                signal=signal_action,
+                price=filled_price,
+                indicators={}
+            )
+            
             self.position_mgr.open_position(
                 strategy_id=strategy_id,
                 strategy_name=strategy_name,
@@ -700,7 +740,9 @@ K線週期: {params['timeframe']}
                 quantity=quantity,
                 entry_price=filled_price,
                 stop_loss_points=stop_loss,
-                take_profit_points=take_profit
+                take_profit_points=take_profit,
+                signal_id=signal_id,
+                strategy_version=strategy.strategy_version
             )
             
             msg = f"""
@@ -747,6 +789,30 @@ K線週期: {params['timeframe']}
         result = self.position_mgr.close_position(strategy_id, price)
         
         if result:
+            signal_id = position.signal_id
+            strategy_version = position.strategy_version
+            
+            # 判斷出场原因
+            exit_reason = "signal_reversal"
+            if position.stop_loss and price <= position.stop_loss:
+                exit_reason = "stop_loss"
+            elif position.take_profit and price >= position.take_profit:
+                exit_reason = "take_profit"
+            
+            # 更新訊號記錄
+            if signal_id:
+                self._get_signal_recorder().update_result(
+                    signal_id=signal_id,
+                    strategy_id=strategy_id,
+                    strategy_version=strategy_version,
+                    status="filled",
+                    exit_price=price,
+                    exit_reason=exit_reason,
+                    pnl=result["pnl"],
+                    filled_at=datetime.now().isoformat(),
+                    filled_quantity=result["quantity"]
+                )
+            
             # 反向下一口平倉
             close_action = "Sell" if position.direction == "Buy" else "Buy"
             self.api.place_order(
@@ -864,14 +930,7 @@ K線週期: {params['timeframe']}
         if not strategy:
             return f"❌ 找不到策略: {strategy_id}"
         
-        if not hasattr(self, '_performance_analyzer'):
-            from src.analysis.performance_analyzer import PerformanceAnalyzer
-            from src.analysis.signal_recorder import SignalRecorder
-            workspace = self.strategy_mgr.workspace_dir
-            signal_recorder = SignalRecorder(workspace)
-            self._performance_analyzer = PerformanceAnalyzer(signal_recorder)
-        
-        return self._performance_analyzer.format_performance_report(strategy_id, period)
+        return self._get_performance_analyzer().format_performance_report(strategy_id, period)
     
     def review_strategy(self, strategy_id: str) -> str:
         """讓 LLM 審查策略並給出修改建議
@@ -888,16 +947,9 @@ K線週期: {params['timeframe']}
         
         if not hasattr(self, '_strategy_reviewer'):
             from src.analysis.strategy_reviewer import StrategyReviewer
-            from src.analysis.performance_analyzer import PerformanceAnalyzer
-            from src.analysis.signal_recorder import SignalRecorder
-            
-            workspace = self.strategy_mgr.workspace_dir
-            signal_recorder = SignalRecorder(workspace)
-            performance_analyzer = PerformanceAnalyzer(signal_recorder)
-            
             self._strategy_reviewer = StrategyReviewer(
                 llm_provider=self._llm_provider,
-                performance_analyzer=performance_analyzer
+                performance_analyzer=self._get_performance_analyzer()
             )
         
         strategy_info = {
@@ -938,13 +990,6 @@ set_goal {strategy_id} <目標金額> <單位>
 - set_goal {strategy_id} 500 daily (每日賺500元)
 - set_goal {strategy_id} 10000 monthly (每月賺10000元)
 """
-        
-        if not hasattr(self, '_performance_analyzer'):
-            from src.analysis.performance_analyzer import PerformanceAnalyzer
-            from src.analysis.signal_recorder import SignalRecorder
-            workspace = self.strategy_mgr.workspace_dir
-            signal_recorder = SignalRecorder(workspace)
-            self._performance_analyzer = PerformanceAnalyzer(signal_recorder)
         
         period_map = {
             "daily": "today",
@@ -1053,16 +1098,9 @@ set_goal {strategy_id} <目標金額> <單位>
         
         if not hasattr(self, '_strategy_reviewer'):
             from src.analysis.strategy_reviewer import StrategyReviewer
-            from src.analysis.performance_analyzer import PerformanceAnalyzer
-            from src.analysis.signal_recorder import SignalRecorder
-            
-            workspace = self.strategy_mgr.workspace_dir
-            signal_recorder = SignalRecorder(workspace)
-            performance_analyzer = PerformanceAnalyzer(signal_recorder)
-            
             self._strategy_reviewer = StrategyReviewer(
                 llm_provider=self._llm_provider,
-                performance_analyzer=performance_analyzer
+                performance_analyzer=self._get_performance_analyzer()
             )
         
         strategy_info = {
@@ -1187,6 +1225,16 @@ set_goal {strategy_id} <目標金額> <單位>
         
         elif "重新設計" in suggestion_type or "redesign" in suggestion_type.lower():
             modification_text = "• 策略需要重新設計，請建立新策略\n"
+        
+        if modification_text and modification_text != "• 策略需要重新設計，請建立新策略\n":
+            old_version = strategy.strategy_version
+            strategy.strategy_version = old_version + 1
+            self._get_signal_recorder().archive_to_new_version(
+                strategy_id=strategy_id,
+                old_version=old_version,
+                new_version=strategy.strategy_version
+            )
+            modification_text += f"• 版本: v{old_version} → v{strategy.strategy_version}\n"
         
         self.strategy_mgr.store.save_strategy(strategy.to_dict())
         

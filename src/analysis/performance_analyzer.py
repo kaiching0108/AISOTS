@@ -13,21 +13,26 @@ class PerformanceAnalyzer:
     def analyze(
         self, 
         strategy_id: str, 
-        period: str = "month"
+        period: str = "month",
+        version: Optional[int] = None
     ) -> Dict[str, Any]:
         """完整績效分析
         
         Args:
             strategy_id: 策略 ID
             period: 查詢週期 (today/week/month/quarter/year/all)
+            version: 版本號 (None 表示最新版本)
             
         Returns:
             dict: 績效分析結果
         """
+        if version is None:
+            version = self.recorder.get_latest_version(strategy_id)
+        
         begin_date, end_date = self._calculate_date_range(period)
         
         signals = self._filter_by_date(
-            self.recorder.get_filled_signals(strategy_id),
+            self.recorder.get_filled_signals(strategy_id, version=version),
             begin_date,
             end_date
         )
@@ -36,6 +41,7 @@ class PerformanceAnalyzer:
         
         return {
             "strategy_id": strategy_id,
+            "version": version,
             "period": period,
             "begin_date": begin_date,
             "end_date": end_date,
@@ -134,10 +140,14 @@ class PerformanceAnalyzer:
     def format_performance_report(
         self, 
         strategy_id: str, 
-        period: str = "month"
+        period: str = "month",
+        version: Optional[int] = None
     ) -> str:
         """格式化績效報告"""
-        analysis = self.analyze(strategy_id, period)
+        if version is None:
+            version = self.recorder.get_latest_version(strategy_id)
+        
+        analysis = self.analyze(strategy_id, period, version)
         stats = analysis["signal_stats"]
         
         period_names = {
@@ -160,8 +170,9 @@ class PerformanceAnalyzer:
         else:
             date_range = ""
         
-        text = f"""📈 策略績效: {strategy_id} {period_name} {date_range}
-─────────────
+        text = f"""📈 策略績效: {strategy_id} (v{version}) {period_name} {date_range}
+────────────
+版本: v{version}
 總訊號數: {stats['total_signals']}
 成交次數: {stats['filled_signals']}
 獲利次數: {stats['win_count']}

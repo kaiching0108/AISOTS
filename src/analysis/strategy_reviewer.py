@@ -20,7 +20,8 @@ class StrategyReviewer:
         Returns:
             str: LLM 審查結果和建議
         """
-        analysis = self.analyzer.analyze(strategy_id, period="month")
+        version = self.analyzer.recorder.get_latest_version(strategy_id)
+        analysis = self.analyzer.analyze(strategy_id, period="month", version=version)
         
         prompt = self._build_review_prompt(analysis, strategy_info)
         

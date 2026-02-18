@@ -276,13 +276,27 @@ class MyStrategy(TradingStrategy):
 
 The system uses JSON files for persistence in `workspace/`:
 
-| File | Description |
-|------|-------------|
+| File/Directory | Description |
+|----------------|-------------|
 | `strategies.json` | Strategy configurations (including LLM-generated code) |
 | `positions.json` | Position tracking |
 | `orders.json` | Order history |
-| `signals.json` | Signal records for performance analysis |
+| `signals/` | Versioned signal records (see below) |
 | `performance.json` | Performance data |
+
+#### Versioned Signal Storage
+
+Signals are stored in versioned files for isolation:
+
+```
+workspace/signals/
+├── strategy_001_v1.json   # v1 signals
+├── strategy_001_v2.json   # v2 signals
+├── strategy_002_v1.json
+└── ...
+```
+
+When a strategy is updated (prompt change or optimization), the version increments and new signals are recorded to the new version file.
 
 Use `JSONStore` from `src/storage/json_store.py` for custom storage.
 
@@ -312,9 +326,10 @@ from pathlib import Path
 
 recorder = SignalRecorder(Path("workspace"))
 
-# Record a signal
+# Record a signal (include strategy version)
 signal_id = recorder.record_signal(
     strategy_id="strategy_001",
+    strategy_version=2,
     signal="buy",
     price=18500,
     indicators={"rsi": 28.5, "macd": "golden_cross"}
@@ -323,10 +338,25 @@ signal_id = recorder.record_signal(
 # Update result when position is closed
 recorder.update_result(
     signal_id=signal_id,
+    strategy_id="strategy_001",
+    strategy_version=2,
     status="filled",
     exit_price=18600,
     exit_reason="take_profit",
     pnl=6000
+)
+
+# Get signals for latest version
+signals = recorder.get_signals("strategy_001")
+
+# Get signals for specific version
+signals = recorder.get_signals("strategy_001", version=2)
+
+# Archive to new version when strategy is updated
+recorder.archive_to_new_version(
+    strategy_id="strategy_001",
+    old_version=1,
+    new_version=2
 )
 ```
 

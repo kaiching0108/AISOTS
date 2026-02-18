@@ -510,6 +510,7 @@ strategies:
 |------|------|
 | `signal_id` | 訊號唯一識別碼 |
 | `strategy_id` | 策略 ID |
+| `strategy_version` | 策略版本號 |
 | `timestamp` | 訊號產生時間 |
 | `signal` | 訊號類型 (buy/sell/close) |
 | `price` | 訊號產生時的價格 |
@@ -519,17 +520,45 @@ strategies:
 | `exit_price` | 出場價格 |
 | `pnl` | 損益 |
 
-#### 儲存位置
+#### 版本化儲存
+
+系統採用版本化檔案結構，每個策略的每個版本獨立儲存：
 
 ```
 workspace/
-├── signals.json      # 訊號記錄
-├── strategies.json   # 策略配置
-├── positions.json    # 部位記錄
-├── orders.json       # 訂單記錄
-└── logs/
-    └── trading.log
+└── signals/
+    ├── strategy_001_v1.json   # v1 版本訊號
+    ├── strategy_001_v2.json   # v2 版本訊號
+    ├── strategy_002_v1.json   # v2 版本訊號
+    └── ...
 ```
+
+**優點**：
+- 不同版本的訊號完全隔離
+- 策略優化後，舊版本資料保留供參考
+- LLM Review 只分析最新版本的表現
+
+#### 版本遞增時機
+
+| 時機 | 動作 |
+|------|------|
+| 更新策略 Prompt | 版本遞增 (v1 → v2) |
+| 確認優化修改 | 版本遞增 (v1 → v2) |
+
+#### 訊號與部位關聯
+
+部位記錄會關聯訊號 ID 和版本號：
+
+```json
+{
+    "strategy_id": "strategy_001",
+    "strategy_version": 2,
+    "signal_id": "sig_abc123...",
+    ...
+}
+```
+
+平倉時會根據 `signal_id` 更新訊號記錄的 `exit_reason` 和 `pnl`。
 
 ### 11.4 績效分析
 
@@ -540,7 +569,19 @@ workspace/
 | 訊號統計 | 總訊號數、成交數、勝率 |
 | 損益統計 | 已實現損益、平均損益、最大單次獲利/虧損 |
 | 停損止盈統計 | 停損觸發次數、止盈觸發次數、訊號反向次數 |
-| 指標有效性 | 哪種指標組合勝率最高 |
+| 版本隔離 | 只分析最新版本的訊號 |
+
+#### 版本化分析
+
+LLM Review 和績效查詢預設分析**最新版本**的訊號，確保分析結果反映當前策略的實際表現。
+
+```
+performance strategy_001 month
+→ 分析 strategy_001_v2.json (最新版本)
+
+review strategy_001
+→ 分析 strategy_001_v2.json (最新版本)
+```
 
 #### 目標達成判斷
 
@@ -912,3 +953,4 @@ auto_review:
 | 3.1.0 | 2026-02 | 新增自我優化系統 - LLM 策略審查 |
 | 3.2.0 | 2026-02 | 新增自我優化系統 - 半自動優化循環 |
 | 3.3.0 | 2026-02 | 新增自動 LLM Review 排程功能 |
+| 3.4.0 | 2026-02 | 新增版本化訊號儲存，策略更新時自動遞增版本 |

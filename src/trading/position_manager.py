@@ -61,13 +61,17 @@ class PositionManager:
         quantity: int,
         entry_price: float,
         stop_loss_points: int = 0,
-        take_profit_points: int = 0
+        take_profit_points: int = 0,
+        signal_id: Optional[str] = None,
+        strategy_version: int = 1
     ) -> Position:
         """開倉
         
         Args:
             stop_loss_points: 停損點數（0=不啟用）
             take_profit_points: 止盈點數（0=不啟用）
+            signal_id: 訊號 ID（用於關聯訊號記錄）
+            strategy_version: 策略版本號
         """
         # 先檢查是否已有部位
         if self.has_position(strategy_id):
@@ -102,7 +106,9 @@ class PositionManager:
             quantity=quantity,
             entry_price=entry_price,
             stop_loss=stop_loss_price,
-            take_profit=take_profit_price
+            take_profit=take_profit_price,
+            signal_id=signal_id,
+            strategy_version=strategy_version
         )
         
         self.positions[strategy_id] = position
