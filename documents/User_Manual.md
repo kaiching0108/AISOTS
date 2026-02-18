@@ -134,8 +134,45 @@ strategies:
 ### 2.3 啟動系統
 
 ```bash
+# 一般啟動（需要 Shioaji 登入）
 python main.py
+
+# 模擬模式（跳過 API 登入，用於測試）
+python main.py --simulate
+
+# CLI 模式（本地命令行操作）
+python main.py --cli
+
+# 模擬 + CLI 模式
+python main.py --simulate --cli
+
+# 指定配置文件
+python main.py --config custom.yaml
 ```
+
+#### 命令行參數說明
+
+| 參數 | 說明 | 範例 |
+|------|------|------|
+| `command` | 命令 (預設: start) | `start` |
+| `--simulate` | 模擬模式，跳過 Shioaji API 登入 | |
+| `--cli` | 啟用本地命令行界面 | |
+| `--config` | 指定配置文件路徑 | `--config myconfig.yaml` |
+
+#### 模擬模式說明
+
+使用 `--simulate` 參數時：
+- 跳過 Shioaji API 登入
+- 模擬下單會立即成交
+- 模擬部位和損益會被追蹤
+- 適合開發測試使用
+
+#### CLI 模式說明
+
+使用 `--cli` 參數時：
+- 啟動本地命令行界面
+- 無需 Telegram Bot 也能操作系統
+- 適合無法使用 Telegram 的環境
 
 成功啟動後會看到類似輸出：
 
@@ -802,6 +839,25 @@ auto_review:
 **解決**：
 1. 確認 config.yaml 中的 key 正確
 2. 檢查 Shioaji 帳號是否已簽署服務條款
+3. **使用模擬模式測試**：`python main.py --simulate`
+
+#### 模擬模式測試
+
+如果您沒有有效的 Shioaji API Key，可以使用模擬模式進行測試：
+
+```bash
+# 模擬模式
+python main.py --simulate
+
+# 模擬 + CLI 模式（無需 Telegram）
+python main.py --simulate --cli
+```
+
+模擬模式下：
+- 跳過 Shioaji API 登入
+- 模擬下單會立即成交
+- 部位和損益會被追蹤
+- 可以測試策略建立、修改等功能
 
 #### 錯誤：Telegram 訊息發送失敗
 
@@ -877,7 +933,22 @@ shioaji:
   simulation: false  # 實盤
 ```
 
-### Q2:如何新增/修改策略？
+或使用命令行參數：
+```bash
+python main.py --simulate  # 模擬模式
+python main.py             # 正常模式（需要 API 登入）
+```
+
+### Q2: 沒有 API Key 如何測試？
+
+使用模擬模式：
+```bash
+python main.py --simulate --cli
+```
+
+這樣可以在沒有 Shioaji API 的情況下測試系統功能。
+
+### Q3:如何新增/修改策略？
 
 編輯 `config.yaml` 中的 `strategies` 區塊，然後重啟系統。
 

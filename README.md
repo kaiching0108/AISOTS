@@ -57,7 +57,17 @@ strategies:
 ## 使用方式
 
 ```bash
+# 一般啟動（需要 Shioaji 登入）
 python main.py
+
+# 模擬模式（跳過 API 登入，用於測試）
+python main.py --simulate
+
+# CLI 模式（本地命令行操作）
+python main.py --cli
+
+# 模擬 + CLI 模式
+python main.py --simulate --cli
 ```
 
 ### 建立策略的兩種方式 (by Telegram)
