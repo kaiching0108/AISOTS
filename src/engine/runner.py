@@ -411,6 +411,11 @@ class StrategyRunner:
         strategies = self.strategy_manager.get_enabled_strategies()
         
         for strategy in strategies:
+            # 如果已啟用但尚未啟動，先啟動
+            if strategy.enabled and not strategy.is_running:
+                logger.info(f"Auto-starting strategy: {strategy.name}")
+                await self.start_strategy(strategy.id)
+            
             if strategy.is_running:
                 try:
                     await self.execute_strategy(strategy)
