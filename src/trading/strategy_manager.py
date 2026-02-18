@@ -155,8 +155,8 @@ class StrategyManager:
         strategy = self.strategies[strategy_id]
         del self.strategies[strategy_id]
         
-        # 從儲存中刪除
-        self.store.delete_by_key("strategies.json", "id", strategy_id)
+        # 從儲存中刪除（包括策略、部位、訂單、訊號檔案）
+        self.store.delete_strategy(strategy_id)
         logger.info(f"刪除策略: {strategy.name}")
         return True
     

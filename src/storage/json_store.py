@@ -223,6 +223,36 @@ class StrategyStore(JSONStore):
             self.save_strategy(strategy)
             return True
         return False
+    
+    def delete_strategy(self, strategy_id: str) -> bool:
+        """刪除策略所有版本及其相關檔案"""
+        deleted = False
+        
+        # 刪除策略檔案（所有版本）
+        for f in self.strategies_dir.glob(f"{strategy_id}_v*.json"):
+            f.unlink()
+            deleted = True
+        
+        # 刪除部位檔案
+        position_file = self.workspace_dir / "positions" / f"{strategy_id}_positions.json"
+        if position_file.exists():
+            position_file.unlink()
+            deleted = True
+        
+        # 刪除訂單檔案
+        order_file = self.workspace_dir / "orders" / f"{strategy_id}_orders.json"
+        if order_file.exists():
+            order_file.unlink()
+            deleted = True
+        
+        # 刪除訊號檔案（所有版本）
+        signals_dir = self.workspace_dir / "signals"
+        if signals_dir.exists():
+            for f in signals_dir.glob(f"{strategy_id}_v*.json"):
+                f.unlink()
+                deleted = True
+        
+        return deleted
 
 
 class PositionStore(JSONStore):

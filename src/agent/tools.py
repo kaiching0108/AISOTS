@@ -112,9 +112,30 @@ K線週期: {strategy.params.get('timeframe', 'N/A')}
     
     def enable_strategy(self, strategy_id: str) -> str:
         """啟用策略"""
+        # 找到要 enable 的策略
+        strategy = self.strategy_mgr.get_strategy(strategy_id)
+        if not strategy:
+            return f"❌ 找不到策略: {strategy_id}"
+        
+        # 檢查同一 symbol 是否有其他版本已 enable
+        same_symbol_strategies = [
+            s for s in self.strategy_mgr.get_all_strategies()
+            if s.symbol == strategy.symbol and s.id != strategy_id and s.enabled
+        ]
+        
+        disabled = []
+        for s in same_symbol_strategies:
+            self.strategy_mgr.disable_strategy(s.id)
+            disabled.append(f"{s.id} ({s.name})")
+        
+        # enable 當前策略
         success = self.strategy_mgr.enable_strategy(strategy_id)
+        
         if success:
-            return f"✅ 策略已啟用: {strategy_id}"
+            result = f"✅ 策略已啟用: {strategy_id}"
+            if disabled:
+                result += f"\n\n⚠️ 已自動停用以下舊版本：\n" + "\n".join(f"  - {d}" for d in disabled)
+            return result
         return f"❌ 啟用失敗: {strategy_id}"
     
     def disable_strategy(self, strategy_id: str) -> str:
@@ -191,9 +212,25 @@ K線週期: {strategy.params.get('timeframe', 'N/A')}
         
         return f"✅ 策略已強制平倉並停用: {strategy_id}"
     
+    def _generate_strategy_id(self, symbol: str) -> str:
+        """自動生成策略 ID：symbol + 3位隨機字符（數字或大寫字母）"""
+        import random
+        import string
+        
+        symbol = symbol.upper().strip()
+        chars = string.ascii_uppercase + string.digits  # A-Z, 0-9
+        
+        max_attempts = 100
+        for _ in range(max_attempts):
+            suffix = ''.join(random.choices(chars, k=3))
+            new_id = f"{symbol}{suffix}"
+            if not self.strategy_mgr.get_strategy(new_id):
+                return new_id
+        
+        return f"{symbol}{''.join(random.choices(chars, k=3))}"
+    
     def create_strategy(
         self,
-        strategy_id: str,
         name: str,
         symbol: str,
         prompt: str,
@@ -202,12 +239,10 @@ K線週期: {strategy.params.get('timeframe', 'N/A')}
         stop_loss: int = 0,
         take_profit: int = 0
     ) -> str:
-        """建立新策略"""
+        """建立新策略（自動生成 ID）"""
         from src.trading.strategy import Strategy
         
         # 驗證必要參數
-        if not strategy_id or not strategy_id.strip():
-            return "❌ 錯誤：請提供策略 ID"
         if not name or not name.strip():
             return "❌ 錯誤：請提供策略名稱"
         if not symbol or not symbol.strip():
@@ -228,9 +263,8 @@ K線週期: {strategy.params.get('timeframe', 'N/A')}
         if take_profit < 0:
             return "❌ 錯誤：止盈不能為負數"
         
-        # 檢查 ID 是否已存在
-        if self.strategy_mgr.get_strategy(strategy_id):
-            return f"❌ 策略 ID 已存在: {strategy_id}"
+        # 自動生成策略 ID
+        strategy_id = self._generate_strategy_id(symbol)
         
         # 建立參數
         params = {
@@ -408,10 +442,7 @@ ID: {strategy_id}
             stop_loss = 30
             take_profit = 50
         
-        strategy_id = f"auto_{name.lower().replace(' ', '_')[:15]}_{random.randint(100, 999)}"
-        
         return {
-            "strategy_id": strategy_id,
             "name": name,
             "symbol": symbol,
             "prompt": prompt,
@@ -530,13 +561,13 @@ ID: {strategy_id}
         
         params = self._pending_strategy
         
-        if self.strategy_mgr.get_strategy(params["strategy_id"]):
-            params["strategy_id"] = f"{params['strategy_id']}_{random.randint(1000, 9999)}"
+        # 使用新的 ID 生成系統
+        strategy_id = self._generate_strategy_id(params["symbol"])
         
         from src.trading.strategy import Strategy
         
         strategy = Strategy(
-            strategy_id=params["strategy_id"],
+            strategy_id=strategy_id,
             name=params["name"],
             symbol=params["symbol"],
             prompt=params["prompt"],
@@ -568,7 +599,7 @@ ID: {strategy_id}
         result = f"""
 ✅ *策略已建立*
 ───────────────
-ID: {params['strategy_id']}
+ID: {strategy_id}
 名稱: {params['name']}
 期貨代碼: {params['symbol']}
 策略描述: {params['prompt']}
@@ -577,7 +608,7 @@ K線週期: {params['timeframe']}
 停損: {params['stop_loss']}點
 止盈: {params['take_profit']}點
 {goal_text}
-請使用 `enable {params['strategy_id']}` 啟用策略
+請使用 `enable {strategy_id}` 啟用策略
 """
         
         self._clear_pending()
@@ -1522,11 +1553,10 @@ Shioaji: {'✅ 連線' if conn_status else '❌ 斷線'}
                 "type": "function",
                 "function": {
                     "name": "create_strategy",
-                    "description": "建立新策略，包含策略ID、名稱、期貨代碼、策略描述、K線週期等參數。",
+                    "description": "建立新策略（ID會自動生成）。需要提供名稱、期貨代碼、策略描述、K線週期等參數。",
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "strategy_id": {"type": "string", "description": "策略ID (自定義，如 my_rsi)"},
                             "name": {"type": "string", "description": "策略名稱"},
                             "symbol": {"type": "string", "description": "期貨代碼 (如 TXF, MXF, EFF)"},
                             "prompt": {"type": "string", "description": "策略描述 (如 RSI 低於 30 買入)"},
@@ -1539,7 +1569,7 @@ Shioaji: {'✅ 連線' if conn_status else '❌ 斷線'}
                             "stop_loss": {"type": "integer", "description": "停損點數，預設 0"},
                             "take_profit": {"type": "integer", "description": "止盈點數，預設 0"}
                         },
-                        "required": ["strategy_id", "name", "symbol", "prompt", "timeframe"]
+                        "required": ["name", "symbol", "prompt", "timeframe"]
                     }
                 }
             },
@@ -1649,7 +1679,6 @@ Shioaji: {'✅ 連線' if conn_status else '❌ 斷線'}
             "disable_strategy": lambda: self.disable_strategy(arguments.get("strategy_id", "")),
             "get_position_by_strategy": lambda: self.get_position_by_strategy(arguments.get("strategy_id", "")),
             "create_strategy": lambda: self.create_strategy(
-                strategy_id=arguments.get("strategy_id", ""),
                 name=arguments.get("name", ""),
                 symbol=arguments.get("symbol", ""),
                 prompt=arguments.get("prompt", ""),
