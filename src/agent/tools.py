@@ -115,14 +115,43 @@ class TradingTools:
         if not strategies:
             return "目前沒有任何策略"
         
-        text = "📋 *策略列表*\n\n"
+        text = f"📋 策略列表（共 {len(strategies)} 個）\n"
+        text += "────────────────────\n\n"
+        
         for s in strategies:
             status = "✅ 啟用" if s.enabled else "❌ 停用"
-            text += f"*{s.name}*\n"
-            text += f"  ID: {s.id}\n"
-            text += f"  合約: {s.symbol}\n"
-            text += f"  狀態: {status}\n"
-            text += f"  參數: {s.params}\n\n"
+            
+            # 策略名稱和狀態
+            text += f"{status} {s.name}\n"
+            text += f"• ID: {s.id}\n"
+            text += f"• 期貨代碼: {s.symbol}\n"
+            
+            # 策略描述（prompt）
+            if s.prompt:
+                prompt_short = s.prompt[:50] + "..." if len(s.prompt) > 50 else s.prompt
+                text += f"• 策略描述: {prompt_short}\n"
+            
+            # 參數
+            params = s.params or {}
+            if params.get("timeframe"):
+                text += f"• K線週期: {params.get('timeframe')}\n"
+            if params.get("quantity"):
+                text += f"• 口數: {params.get('quantity')}口\n"
+            if params.get("stop_loss"):
+                text += f"• 停損: {params.get('stop_loss')}點\n"
+            if params.get("take_profit"):
+                text += f"• 止盈: {params.get('take_profit')}點\n"
+            
+            # 目標
+            if s.goal:
+                unit_names = {"daily": "每日", "weekly": "每週", "monthly": "每月"}
+                unit = unit_names.get(s.goal_unit, s.goal_unit)
+                text += f"• 目標: {unit}賺 {s.goal:,} 元\n"
+            
+            text += "\n"
+        
+        text += "────────────────────\n"
+        text += "輸入「策略 <ID>」查看詳細狀態"
         
         return text
     
@@ -1441,7 +1470,7 @@ Shioaji: {'✅ 連線' if conn_status else '❌ 斷線'}
                 "type": "function",
                 "function": {
                     "name": "get_strategies",
-                    "description": "查詢所有已配置的交易策略及其狀態（啟用/停用）。相當於問「有哪些策略」、「策略列表」。",
+                    "description": "查詢所有已配置的策略，包含名稱、ID、合約、狀態、策略描述(prompt)、參數(K線週期/口數/停損/止盈)、目標。當用戶問「策略有哪些」「策略列表」「strategies」「策略」時**必須**呼叫此工具。",
                     "parameters": {"type": "object", "properties": {}}
                 }
             },
