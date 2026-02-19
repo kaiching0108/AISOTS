@@ -20,7 +20,13 @@ cd ai_futures_trading
 pip install -r requirements.txt
 ```
 
-## 設定
+## Telegram 
+Create a bot
+    Open Telegram, search @BotFather
+    Send /newbot, follow prompts
+    Copy the token
+
+## Config設定 
 
 編輯 `config.yaml`：
 
