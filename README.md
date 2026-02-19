@@ -21,10 +21,10 @@ pip install -r requirements.txt
 ```
 
 ## Telegram 
-Create a bot
-    Open Telegram, search @BotFather
-    Send /newbot, follow prompts
-    Copy the token
+- Create a bot
+  - Open Telegram, search @BotFather
+  - Send /newbot, follow prompts
+  - Copy the token
 
 ## Config設定 
 
