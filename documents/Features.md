@@ -31,6 +31,60 @@ python main.py --config custom.yaml
 
 ## 1. 核心功能
 
+### 1.1 Fallback 命令處理機制
+
+系統採用 **fallback 機制**來處理基本命令，確保執行成功：
+
+#### 設計原理
+
+傳統的 LLM Agent 依賴 LLM 調用工具（Tool Calling），但有時 LLM 會忘記調用工具或錯誤判斷用戶意圖，導致命令無法執行。
+
+#### 實現方式
+
+在 `main.py` 的 `llm_process_command()` 函數中添加正則表達式匹配，直接調用對應函數：
+
+```python
+# 直接處理 enable/disable 命令
+enable_match = re.match(r'^enable\s+(\w+)$', command_stripped)
+disable_match = re.match(r'^disable\s+(\w+)$', command_stripped)
+
+if enable_match:
+    strategy_id = enable_match.group(1).upper()
+    result = self.trading_tools.enable_strategy(strategy_id)
+    return result
+
+# 基本查詢命令直接調用
+if command_stripped in ["positions", "部位", "持倉"]:
+    result = self.trading_tools.get_positions()
+    return result
+```
+
+#### 支援的命令
+
+| 命令 | 處理方式 |
+|------|---------|
+| `status` | 直接調用 `get_system_status()` |
+| `positions` / `部位` / `持倉` | 直接調用 `get_positions()` |
+| `strategies` / `策略` | 直接調用 `get_strategies()` |
+| `performance` / `績效` / `表現` | 直接調用 `get_performance()` |
+| `risk` / `風控` / `風險` | 直接調用 `get_risk_status()` |
+| `orders` / `訂單` / `委託` | 直接調用 `get_order_history()` |
+| `new` / `新對話` / `新會話` | 清除對話歷史 |
+| `help` / `幫助` | 返回命令列表 |
+| `enable <ID>` | 直接調用 `enable_strategy()` |
+| `disable <ID>` | 直接調用 `disable_strategy()` |
+
+#### 優勢
+
+1. **可靠性**：基本命令一定會執行，不依賴 LLM 工具調用
+2. **速度**：直接函數調用比 LLM 推理更快
+3. **容錯**：複雜的自然語言仍交給 LLM 處理
+
+#### 設計原則
+
+- 簡單、明確的命令 → fallback 直接處理
+- 複雜的自然語言 → 交給 LLM 處理（如建立策略、修改策略）
+
 ### 1.1 策略類型：兩階段執行
 
 系統支援兩種策略執行模式：
@@ -992,3 +1046,4 @@ auto_review:
 | 3.3.0 | 2026-02 | 新增自動 LLM Review 排程功能 |
 | 3.4.0 | 2026-02 | 新增版本化訊號儲存，策略更新時自動遞增版本 |
 | 3.5.0 | 2026-02 | 重構儲存系統，採用 per-strategy 結構 |
+| 3.6.0 | 2026-02 | 新增 Fallback 命令處理機制，確保基本命令執行成功 |

@@ -12,6 +12,71 @@ from src.logger import logger
 from telegram.request import HTTPXRequest
 
 
+def clean_markdown_for_telegram(text: str) -> str:
+    """清理 Markdown 格式，轉換為 Telegram 友好的純文字
+    
+    處理：
+    1. 移除 ** 粗體標記
+    2. 移除 * 斜體標記
+    3. 移除 ###、##、# 標題標記
+    4. 將表格轉換為清單格式
+    5. 移除 --- 分隔線，改為統一的符號
+    6. 移除多餘空行
+    
+    Args:
+        text: 原始文字（可能包含 Markdown）
+        
+    Returns:
+        清理後的純文字
+    """
+    if not text:
+        return text
+        
+    # 移除粗體標記 **text** → text
+    text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)
+    
+    # 移除斜體標記 *text* → text（但保留 emoji 中的星號）
+    # 使用 negative lookbehind 避免匹配 emoji
+    text = re.sub(r'(?<![\u263a-\U0001f645])\*(.*?)\*(?![\u263a-\U0001f645])', r'\1', text)
+    
+    # 移除標題標記 ### → 直接文字
+    text = re.sub(r'###\s*', '', text)
+    text = re.sub(r'##\s*', '', text)
+    text = re.sub(r'#\s*', '', text)
+    
+    # 將表格行轉換為清單
+    lines = text.split('\n')
+    cleaned_lines = []
+    for line in lines:
+        # 跳過表格分隔線
+        if line.strip().startswith('|---') or line.strip().startswith('|=='):
+            continue
+        # 處理表格行 | 欄位1 | 欄位2 |
+        if '|' in line and line.count('|') >= 2:
+            parts = [p.strip() for p in line.split('|') if p.strip()]
+            if len(parts) >= 2:
+                # 將表格轉為 • 格式
+                cleaned_lines.append(f"• {' | '.join(parts)}")
+            elif len(parts) == 1:
+                cleaned_lines.append(f"• {parts[0]}")
+            else:
+                cleaned_lines.append(line)
+        else:
+            # 移除 --- 或 === 分隔線
+            if line.strip() == '---' or line.strip().startswith('===') or line.strip().startswith('---'):
+                cleaned_lines.append('─' * 30)  # 改為統一的分隔線
+            else:
+                cleaned_lines.append(line)
+    
+    # 重新組合
+    text = '\n'.join(cleaned_lines)
+    
+    # 移除多餘空行
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    
+    return text.strip()
+
+
 class TelegramNotifier:
     """Telegram 通知機器人"""
     
@@ -26,18 +91,29 @@ class TelegramNotifier:
             logger.warning("Telegram 配置不完整")
             self.enabled = False
     
-    def send_message(self, text: str, parse_mode: str = "Markdown") -> bool:
-        """發送訊息"""
+    def send_message(self, text: str, parse_mode: str = None) -> bool:
+        """發送訊息
+        
+        Args:
+            text: 訊息內容（會自動清理 Markdown 格式）
+            parse_mode: 解析模式，預設為 None（純文字），可選 "Markdown" 或 "HTML"
+        """
         if not self.enabled:
             return False
+        
+        # 自動清理 Markdown 格式
+        text = clean_markdown_for_telegram(text)
         
         try:
             url = f"{self.api_url}/sendMessage"
             data = {
                 "chat_id": self.chat_id,
-                "text": text,
-                "parse_mode": parse_mode
+                "text": text
             }
+            
+            # 只有明確指定時才使用 Markdown/HTML 解析
+            if parse_mode:
+                data["parse_mode"] = parse_mode
             
             response = requests.post(url, json=data, timeout=10)
             result = response.json()
@@ -45,6 +121,13 @@ class TelegramNotifier:
             if result.get("ok"):
                 return True
             else:
+                # 如果發送失敗且使用了 parse_mode，嘗試用純文字重發
+                if parse_mode and "parse_mode" in data:
+                    logger.warning(f"Telegram 發送失敗（{parse_mode}），嘗試純文字: {result}")
+                    data.pop("parse_mode")
+                    response = requests.post(url, json=data, timeout=10)
+                    result = response.json()
+                    return result.get("ok", False)
                 logger.error(f"Telegram 發送失敗: {result}")
                 return False
                 
@@ -156,20 +239,23 @@ f"最大回撤: {perf.get('max_drawdown', 0):+,.0f}" if perf.get('max_drawdown')
 """
         return self.send_message(text)
     
-    def send_long_message(self, text: str, parse_mode: str = "Markdown") -> bool:
+    def send_long_message(self, text: str, parse_mode: str = None) -> bool:
         """發送長訊息，自動分段處理 Telegram 字數限制
         
         Telegram 普通訊息上限為 4096 字元，此方法會自動分段發送。
         
         Args:
-            text: 要發送的訊息內容
-            parse_mode: Markdown 或 HTML
+            text: 要發送的訊息內容（會自動清理 Markdown 格式）
+            parse_mode: Markdown 或 HTML，預設為 None（純文字）
             
         Returns:
             bool: 是否全部發送成功
         """
         if not self.enabled:
             return False
+        
+        # 自動清理 Markdown 格式
+        text = clean_markdown_for_telegram(text)
         
         MAX_LENGTH = 4000
         
@@ -426,14 +512,13 @@ class TelegramBot:
 
         try:
             result = await self.command_handler(user_text)
-            try:
-                await message.reply_text(result, parse_mode="Markdown")
-            except Exception as e:
-                logger.warning(f"Markdown 解析失敗，嘗試發送純文字: {e}")
-                await message.reply_text(result, parse_mode=None)
+            # 清理 Markdown 格式後發送
+            cleaned_result = clean_markdown_for_telegram(result)
+            await message.reply_text(cleaned_result, parse_mode=None)
         except Exception as e:
             logger.error(f"處理命令失敗: {e}")
-            await message.reply_text(f"❌ 處理命令時發生錯誤: {e}")
+            error_msg = clean_markdown_for_telegram(f"❌ 處理命令時發生錯誤: {e}")
+            await message.reply_text(error_msg, parse_mode=None)
 
     async def _on_error(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         """處理錯誤"""

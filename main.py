@@ -417,6 +417,7 @@ class AITradingSystem:
     async def llm_process_command(self, command: str) -> str:
         """透過 LLM 處理命令"""
         import json
+        import re
         
         # 檢查是否為確認關鍵詞（直接處理，避免 LLM 忘記調用工具）
         command_stripped = command.strip().lower()
@@ -429,6 +430,119 @@ class AITradingSystem:
                 result = self.trading_tools.confirm_create_strategy(confirmed=True)
                 self._add_to_history(command, result)
                 return result
+            elif getattr(self.trading_tools, '_awaiting_symbol', False):
+                # 正在等待期貨代碼，但用戶說了確認
+                # 這表示用戶可能還沒理解需要輸入期貨代碼
+                return "請輸入期貨代碼（如 TXF、MXF、TMF）來繼續建立策略"
+        
+        # 直接處理 enable/disable 命令
+        enable_match = re.match(r'^enable\s+(\w+)$', command_stripped)
+        disable_match = re.match(r'^disable\s+(\w+)$', command_stripped)
+        
+        if enable_match:
+            strategy_id = enable_match.group(1).upper()
+            self.logger.info(f"Directly enabling strategy: {strategy_id}")
+            result = self.trading_tools.enable_strategy(strategy_id)
+            self._add_to_history(command, result)
+            return result
+        
+        if disable_match:
+            strategy_id = disable_match.group(1).upper()
+            self.logger.info(f"Directly disabling strategy: {strategy_id}")
+            result = self.trading_tools.disable_strategy(strategy_id)
+            self._add_to_history(command, result)
+            return result
+        
+        # 直接處理策略建立關鍵字
+        creation_keywords = ["設計", "建立", "創建", "design", "create", "幫我設計", "幫我建立", "我想設計", "我想建立"]
+        if any(kw in command_stripped for kw in creation_keywords):
+            # 從命令中提取期貨代碼
+            found_symbol = None
+            for symbol in self.trading_tools._valid_symbols:
+                if symbol in command_stripped.upper():
+                    found_symbol = symbol
+                    break
+            
+            # 提取目標描述（移除關鍵字和期貨代碼）
+            goal = command
+            for kw in creation_keywords:
+                goal = goal.replace(kw, "")
+            if found_symbol:
+                goal = goal.replace(found_symbol, "").replace(found_symbol.lower(), "")
+            goal = goal.strip(" ，,、.")
+            
+            # 如果沒找到期貨代碼，詢問用戶
+            if not found_symbol:
+                self.logger.info(f"Strategy creation requested but no symbol found")
+                return "請問要使用哪個期貨合約？（如 TXF、MXF、TMF）"
+            
+            # 直接呼叫 create_strategy_by_goal
+            self.logger.info(f"Directly creating strategy: goal={goal}, symbol={found_symbol}")
+            result = self.trading_tools.create_strategy_by_goal(goal, found_symbol)
+            self._add_to_history(command, result)
+            return result
+        
+        # 直接處理常見命令
+        # status
+        if command_stripped == "status":
+            result = self.trading_tools.get_system_status()
+            self._add_to_history(command, result)
+            return result
+        
+        # positions / 部位
+        if command_stripped in ["positions", "部位", "持倉"]:
+            result = self.trading_tools.get_positions()
+            self._add_to_history(command, result)
+            return result
+        
+        # strategies / 策略
+        if command_stripped in ["strategies", "策略", "策略列表"]:
+            result = self.trading_tools.get_strategies()
+            self._add_to_history(command, result)
+            return result
+        
+        # performance / 績效
+        if command_stripped in ["performance", "績效", "表現"]:
+            result = self.trading_tools.get_performance()
+            self._add_to_history(command, result)
+            return result
+        
+        # risk / 風控
+        if command_stripped in ["risk", "風控", "風險"]:
+            result = self.trading_tools.get_risk_status()
+            self._add_to_history(command, result)
+            return result
+        
+        # orders / 訂單
+        if command_stripped in ["orders", "訂單", "委託"]:
+            result = self.trading_tools.get_order_history(None)
+            self._add_to_history(command, result)
+            return result
+        
+        # new / 新對話
+        if command_stripped in ["new", "新對話", "新會話"]:
+            self.conversation_history = []
+            self._add_to_history(command, "✅ 對話歷史已清除")
+            return "✅ 對話歷史已清除"
+        
+        # help / 幫助
+        if command_stripped in ["help", "幫助", "?", "？"]:
+            result = """📋 *命令列表*
+
+🔍 基本查詢
+• status - 系統狀態
+• positions / 部位 - 目前部位
+• strategies / 策略 - 所有策略
+• performance - 當日績效
+• risk / 風控 - 風控狀態
+
+📦 策略管理
+• enable <ID> - 啟用策略
+• disable <ID> - 停用策略
+
+❓ 輸入文字描述讓 AI 幫你操作"""
+            self._add_to_history(command, result)
+            return result
         
         # 檢查是否正在等待期貨代碼輸入（_awaiting_symbol=True）
         # 如果用戶直接回覆期貨代碼，直接處理
@@ -470,6 +584,8 @@ class AITradingSystem:
         tools = self.trading_tools.get_tool_definitions()
         
         try:
+            self.logger.info(f"LLM processing command: {command}")
+            
             # 呼叫 LLM
             response = await self.llm_provider.chat_with_tools(
                 messages=messages,
@@ -479,6 +595,9 @@ class AITradingSystem:
             
             # 獲取 LLM 回覆內容
             content = response.get("content", "")
+            tool_calls = response.get("tool_calls", [])
+            
+            self.logger.info(f"LLM response - content: {content[:100] if content else 'None'}, tool_calls: {len(tool_calls)}")
             
             # 檢查是否有 tool calls
             tool_calls = response.get("tool_calls", [])
@@ -488,6 +607,8 @@ class AITradingSystem:
                 tool_call = tool_calls[0]
                 function_name = tool_call["function"]["name"]
                 arguments = json.loads(tool_call["function"]["arguments"])
+                
+                self.logger.info(f"LLM tool call - function: {function_name}, arguments: {arguments}")
                 
                 # 執行工具
                 result = self.trading_tools.execute_tool(function_name, arguments)

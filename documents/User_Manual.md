@@ -634,18 +634,30 @@ ID: MXFA01
 
 ## 6. 命令列表
 
-### 6.1 基本命令
+### 6.1 基本命令（直接執行）
+
+以下命令透過 **fallback 機制**直接調用函數，不依賴 LLM 工具調用，確保執行成功：
 
 | 命令 | 說明 | 範例 |
 |------|------|------|
 | `status` | 系統狀態 | status |
-| `positions` | 目前部位 | positions |
-| `strategies` | 策略列表 | strategies |
-| `performance` | 整體當日績效 | performance |
-| `risk` | 風控狀態 | risk |
-| `orders` | 訂單歷史 | orders |
+| `positions` / `部位` / `持倉` | 目前部位 | positions |
+| `strategies` / `策略` | 策略列表 | strategies |
+| `performance` / `績效` / `表現` | 整體當日績效 | performance |
+| `risk` / `風控` / `風險` | 風控狀態 | risk |
+| `orders` / `訂單` / `委託` | 訂單歷史 | orders |
+| `new` / `新對話` / `新會話` | 清除對話歷史 | new |
+| `help` / `幫助` | 顯示命令列表 | help |
 | `enable <id>` | 啟用策略 | enable MXFA01 |
 | `disable <id>` | 停用策略 | disable MXFA01 |
+
+### 6.2 需要 LLM 處理的命令
+
+以下命令需要 LLM 處理複雜的自然語言輸入：
+
+| 命令 | 說明 | 範例 |
+|------|------|------|
+| (自然語言) | 讓 AI 幫你操作 | 幫我建立一個 RSI 策略 |
 | `price <symbol>` | 查詢報價 | price TXF |
 | `status <id>` | 策略狀態 | status MXFA01 |
 
@@ -938,9 +950,17 @@ python main.py --simulate --cli
 
 ### Q3:如何新增/修改策略？
 
-編輯 `config.yaml` 中的 `strategies` 區塊，然後重啟系統。
+透過 Telegram 對話告訴 AI 你的需求，例如：
+- 「幫我設計一個 RSI 策略」
+- 「設計一個每日賺 500 元的策略」
 
-### Q3:策略 Prompt 應該怎麼撰寫？
+系統會自動詢問期貨代碼、推斷參數，讓你確認後建立策略。
+
+### Q4: 為什麼有些命令不用經過 LLM？
+
+系統採用 **fallback 機制**：基本命令（如 `status`、`positions`、`enable`、`disable` 等）直接調用函數，確保一定會執行，不會因為 LLM 忘記調用工具而失敗。
+
+複雜的自然語言指令（如建立策略、修改策略）仍會交給 LLM 處理。
 
 使用自然語言描述您的交易邏輯，例如：
 - 「RSI 低於 30 買入」
@@ -1037,5 +1057,5 @@ User (Telegram)
 
 ---
 
-**版本**: 2.2.0  
-**更新日期**: 2026-02-18
+**版本**: 2.3.0  
+**更新日期**: 2026-02-19

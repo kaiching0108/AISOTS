@@ -118,7 +118,6 @@ class Strategy:
         self.strategy_code = code
         self.strategy_class_name = class_name
         self.strategy_generated_at = datetime.now().isoformat()
-        self.strategy_version += 1
         self.prompt_hash = hashlib.md5(self.prompt.encode()).hexdigest()
     
     def needs_regeneration(self) -> bool:

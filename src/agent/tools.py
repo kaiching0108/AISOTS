@@ -7,6 +7,7 @@ from src.trading.strategy_manager import StrategyManager
 from src.trading.position_manager import PositionManager
 from src.trading.order_manager import OrderManager
 from src.risk.risk_manager import RiskManager
+from src.notify.telegram import clean_markdown_for_telegram
 
 
 class TradingTools:
@@ -147,7 +148,8 @@ class TradingTools:
             if s.goal:
                 unit_names = {"daily": "每日", "weekly": "每週", "monthly": "每月"}
                 unit = unit_names.get(s.goal_unit, s.goal_unit)
-                text += f"• 目標: {unit}賺 {s.goal:,} 元\n"
+                goal_val = int(s.goal) if str(s.goal).isdigit() else s.goal
+                text += f"• 目標: {unit}賺 {goal_val} 元\n"
             
             text += "\n"
         
@@ -193,10 +195,15 @@ K線週期: {strategy.params.get('timeframe', 'N/A')}
     
     def enable_strategy(self, strategy_id: str) -> str:
         """啟用策略"""
+        logger.info(f"Enable strategy called: {strategy_id}")
+        
         # 找到要 enable 的策略
         strategy = self.strategy_mgr.get_strategy(strategy_id)
         if not strategy:
+            logger.error(f"Strategy not found: {strategy_id}")
             return f"❌ 找不到策略: {strategy_id}"
+        
+        logger.info(f"Found strategy: {strategy.name}, current enabled: {strategy.enabled}")
         
         # 檢查同一 symbol 是否有其他版本已 enable
         same_symbol_strategies = [
@@ -211,6 +218,7 @@ K線週期: {strategy.params.get('timeframe', 'N/A')}
         
         # enable 當前策略
         success = self.strategy_mgr.enable_strategy(strategy_id)
+        logger.info(f"Enable result: {success}")
         
         if success:
             params = strategy.params or {}
@@ -490,7 +498,53 @@ ID: {strategy_id}
         self._awaiting_confirm = True
         self._current_goal = goal
         
+        # 先推斷基本參數
         inferred = self._infer_strategy_params(goal, symbol)
+        
+        # 使用 LLM 設計具體的策略邏輯
+        logger.info(f"Attempting to design strategy with LLM. Provider: {self._llm_provider is not None}")
+        if self._llm_provider:
+            try:
+                import asyncio
+                import nest_asyncio
+                nest_asyncio.apply()
+                
+                design_prompt = f"""請為以下交易策略設計具體的交易邏輯和進出場條件：
+
+目標：{goal}
+商品：{symbol}
+停損：{inferred['stop_loss']}點
+止盈：{inferred['take_profit']}點
+
+請設計一個完整的交易策略，包含：
+1. 使用的技術指標（如RSI、MACD、均線等）
+2. 具體的買入條件
+3. 具體的賣出條件
+4. 停損止盈的執行邏輯
+
+請用繁體中文回答，直接描述策略邏輯即可，不需要代碼。"""
+                
+                logger.info(f"Calling LLM to design strategy...")
+                messages = [{"role": "user", "content": design_prompt}]
+                
+                # 使用 nest_asyncio 來支持在已有 event loop 中運行
+                loop = asyncio.get_event_loop()
+                response = loop.run_until_complete(
+                    self._llm_provider.chat(messages, temperature=0.7)
+                )
+                
+                designed_prompt = response.strip()
+                logger.info(f"LLM designed prompt: {designed_prompt[:100]}...")
+                
+                if designed_prompt:
+                    inferred['prompt'] = designed_prompt
+                    logger.info("Strategy prompt updated with LLM design")
+            except Exception as e:
+                logger.warning(f"LLM 設計策略失敗，使用預設描述: {e}")
+                import traceback
+                logger.warning(traceback.format_exc())
+        else:
+            logger.warning("LLM provider not available, using default prompt")
         
         self._pending_strategy = inferred
         
@@ -500,51 +554,69 @@ ID: {strategy_id}
         """根據目標推斷策略參數"""
         import random
         import hashlib
+        import re
         
         goal_lower = goal.lower()
         
+        # 從目標描述中提取數字（如「每日賺2000元」提取 2000）
+        goal_value = None
+        # 匹配數字（支持千分位逗號）
+        numbers = re.findall(r'(\d{1,3}(?:,\d{3})*|\d+)', goal)
+        if numbers:
+            # 取最後一個數字（通常是目標金額）
+            goal_value = int(numbers[-1].replace(',', ''))
+        
+        # 根據用戶輸入推斷策略類型和參數
+        # 注意：prompt 是描述性的，讓 LLM 去發揮生成具體策略代碼
+        
         if "rsi" in goal_lower:
             name = f"RSI策略_{symbol}"
-            prompt = "RSI 低於 30 買入，RSI 高於 70 賣出"
+            prompt = f"使用RSI指標在{symbol}上交易，目標"
             timeframe = "15m"
             stop_loss = 30
             take_profit = 50
         elif "macd" in goal_lower or "金叉" in goal_lower or "死叉" in goal_lower:
             name = f"MACD策略_{symbol}"
-            prompt = "MACD 金叉買入，死叉賣出"
+            prompt = f"使用MACD指標在{symbol}上交易，目標"
             timeframe = "15m"
             stop_loss = 40
             take_profit = 60
-        elif "均線" in goal_lower or "均線" in goal:
+        elif "均線" in goal_lower:
             name = f"均線策略_{symbol}"
-            prompt = "價格站上均線買入，跌破均線賣出"
+            prompt = f"使用均線系統在{symbol}上交易，目標"
             timeframe = "15m"
             stop_loss = 30
             take_profit = 50
         elif "突破" in goal_lower:
             name = f"突破策略_{symbol}"
-            prompt = "價格突破當日高點買入，跌破低點賣出"
+            prompt = f"使用突破策略在{symbol}上交易，目標"
             timeframe = "15m"
             stop_loss = 40
             take_profit = 80
-        elif "每日" in goal_lower or "500" in goal_lower or "賺" in goal_lower:
-            name = f"每日收益策略_{symbol}"
-            prompt = "價格站上均線買入，跌破均線賣出，配合移動停損"
+        elif "布林" in goal_lower:
+            name = f"布林帶策略_{symbol}"
+            prompt = f"使用布林帶指標在{symbol}上交易，目標"
             timeframe = "15m"
-            stop_loss = 30
-            take_profit = 50
-        elif "動量" in goal_lower or " momentum" in goal_lower:
+            stop_loss = 35
+            take_profit = 70
+        elif "動量" in goal_lower:
             name = f"動量策略_{symbol}"
-            prompt = "價格動量向上時買入，向下時賣出"
+            prompt = f"使用動量指標在{symbol}上交易，目標"
             timeframe = "1h"
             stop_loss = 50
             take_profit = 100
         else:
-            name = f"趨勢策略_{symbol}"
-            prompt = "價格趨勢向上買入，向下賣出"
+            name = f"收益策略_{symbol}"
+            prompt = f"設計一個交易策略在{symbol}上執行，目標"
             timeframe = "15m"
             stop_loss = 30
             take_profit = 50
+        
+        # 將用戶的原始目標描述附加到 prompt
+        if goal_value:
+            prompt += f"每日獲利{goal_value}元，停損{stop_loss}點，止盈{take_profit}點。請根據此目標設計完整的交易邏輯和進出場條件。"
+        else:
+            prompt += f"：{goal}。請根據此目標設計完整的交易邏輯和進出場條件。"
         
         return {
             "name": name,
@@ -554,27 +626,43 @@ ID: {strategy_id}
             "quantity": 1,
             "stop_loss": stop_loss,
             "take_profit": take_profit,
-            "goal": goal
+            "goal": goal_value  # 存數字而不是文字描述
         }
+    
+    def _clean_markdown_for_telegram(self, text: str) -> str:
+        """清理 Markdown 格式，轉換為 Telegram 友好的純文字
+        
+        調用全域函數進行清理
+        """
+        return clean_markdown_for_telegram(text)
     
     def _format_strategy_confirmation(self, params: Dict[str, Any]) -> str:
         """格式化策略確認訊息"""
-        return f"""
-📋 *策略參數確認*
-────────────────
-請確認以下參數是否正確：
+        # 清理策略描述中的 Markdown
+        clean_prompt = self._clean_markdown_for_telegram(params['prompt'])
+        
+        # 顯示完整策略描述，不截斷
+        display_prompt = clean_prompt
+        
+        return f"""📋 策略參數確認
+{'='*30}
 
-• 名稱: {params['name']}
-• 期貨代碼: {params['symbol']}
-• 策略描述: {params['prompt']}
-• K線週期: {params['timeframe']}
-• 交易口數: {params['quantity']}
-• 停損: {params['stop_loss']}點
-• 止盈: {params['take_profit']}點
+📌 基本資訊
+名稱: {params['name']}
+期貨: {params['symbol']}
+K線週期: {params['timeframe']}
+口數: {params['quantity']}
 
-────────────────
-輸入「確認」建立策略，或修改部分參數（如「停損改成50點」）
-"""
+📊 風險控制
+停損: {params['stop_loss']}點
+止盈: {params['take_profit']}點
+
+📝 策略描述
+{display_prompt}
+
+{'='*30}
+輸入「確認」建立策略
+或修改參數（如「停損改成50點」）"""
     
     def modify_strategy_params(self, modifications: str) -> str:
         """修改待確認的策略參數，並重新生成策略 prompt"""
@@ -702,24 +790,42 @@ ID: {strategy_id}
                 "yearly": "每年"
             }
             unit = params.get("goal_unit", "daily")
-            goal_text = f"目標: {unit_names.get(unit, unit)}賺 {params['goal']:,} 元\n"
+            goal_val = params['goal']
+            # 處理目標值可能是數字或字串的情況
+            if isinstance(goal_val, (int, float)):
+                goal_text = f"目標: {unit_names.get(unit, unit)}賺 {goal_val:,} 元\n"
+            else:
+                goal_text = f"目標: {unit_names.get(unit, unit)}賺 {goal_val} 元\n"
         
-        result = f"""
-✅ *策略已建立（停用中）*
-─────────────────────
+        # 清理策略描述中的 Markdown 格式
+        clean_prompt = self._clean_markdown_for_telegram(params['prompt'])
+        
+        # 限制顯示長度
+        if len(clean_prompt) > 400:
+            display_prompt = clean_prompt[:400] + "\n...(完整內容請查看策略詳情)"
+        else:
+            display_prompt = clean_prompt
+        
+        result = f"""✅ 策略已建立（停用中）
+{'='*30}
+
+📌 基本資訊
 ID: {strategy_id}
 名稱: {params['name']}
-期貨代碼: {params['symbol']}
-策略描述: {params['prompt']}
+期貨: {params['symbol']}
 K線週期: {params['timeframe']}
-數量: {params['quantity']}
+口數: {params['quantity']}
+
+📊 風險控制
 停損: {params['stop_loss']}點
 止盈: {params['take_profit']}點
 {goal_text}
-─────────────────────
+📝 策略描述
+{display_prompt}
+
+{'='*30}
 ⚠️ 策略已建立但尚未啟用！
-請說「啟用 {strategy_id}」開始交易
-"""
+請說「啟用 {strategy_id}」開始交易"""
         
         self._clear_pending()
         return result
@@ -1648,6 +1754,20 @@ Shioaji: {'✅ 連線' if conn_status else '❌ 斷線'}
             {
                 "type": "function",
                 "function": {
+                    "name": "confirm_disable_strategy",
+                    "description": "確認停用策略 (當用戶說「確認停用」或「confirm disable」時調用，若有部位會強制平倉)",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "strategy_id": {"type": "string", "description": "策略ID"}
+                        },
+                        "required": ["strategy_id"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
                     "name": "get_position_by_strategy",
                     "description": "取得指定策略的部位",
                     "parameters": {
@@ -1716,12 +1836,12 @@ Shioaji: {'✅ 連線' if conn_status else '❌ 斷線'}
                 "type": "function",
                 "function": {
                     "name": "create_strategy_by_goal",
-                    "description": "根據用戶目標自動推斷參數並建立策略。當用戶說「幫我建立策略」時調用。若未提供期貨代碼，會詢問用戶。",
+                    "description": "根據用戶目標自動推斷參數並建立策略。當用戶說「幫我建立策略」時調用。",
                     "parameters": {
                         "type": "object",
                         "properties": {
                             "goal": {"type": "string", "description": "用戶的目標描述（如「幫我建立RSI策略」「設計一個每日賺500元的策略」）"},
-                            "symbol": {"type": "string", "description": "期貨代碼（如 TXF、MXF、EFF），若不提供則會詢問用戶"}
+                            "symbol": {"type": "string", "description": "期貨代碼（如 TXF、MXF、TMF）。若不提供，系統會詢問用戶"}
                         },
                         "required": ["goal"]
                     }
@@ -1787,6 +1907,7 @@ Shioaji: {'✅ 連線' if conn_status else '❌ 斷線'}
             "get_market_data": lambda: self.get_market_data(arguments.get("symbol", "")),
             "enable_strategy": lambda: self.enable_strategy(arguments.get("strategy_id", "")),
             "disable_strategy": lambda: self.disable_strategy(arguments.get("strategy_id", "")),
+            "confirm_disable_strategy": lambda: self.confirm_disable_strategy(arguments.get("strategy_id", "")),
             "get_position_by_strategy": lambda: self.get_position_by_strategy(arguments.get("strategy_id", "")),
             "create_strategy": lambda: self.create_strategy(
                 name=arguments.get("name", ""),

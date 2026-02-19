@@ -220,6 +220,7 @@ class StrategyRunner:
         Returns:
             是否成功
         """
+        logger.info(f"generate_strategy_code check - has_valid: {strategy.has_valid_strategy_code()}, needs_regen: {strategy.needs_regeneration()}, strategy_code: {strategy.strategy_code is not None}")
         if strategy.has_valid_strategy_code() and not strategy.needs_regeneration():
             return True
         
@@ -249,7 +250,9 @@ class StrategyRunner:
                 return False
             
             strategy.set_strategy_code(code, class_name)
+            logger.info(f"Strategy code set - strategy_code: {strategy.strategy_code[:50] if strategy.strategy_code else None}...")
             self.strategy_manager.store.save_strategy(strategy.to_dict())
+            logger.info(f"Strategy dict saved - strategy_code in dict: {strategy.to_dict().get('strategy_code', 'NOT FOUND')[:50] if strategy.to_dict().get('strategy_code') else None}...")
             
             logger.info(f"Strategy code generated and saved: {class_name}")
             return True
