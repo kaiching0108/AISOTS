@@ -333,6 +333,22 @@ class StrategyRunner:
         if not market_data or not market_data.close_prices:
             return None
         
+        # 填充歷史 K 棒數據（如果策略尚未初始化）
+        strategy_bars = executor.strategy.get_bars()
+        if len(strategy_bars) == 0 and len(market_data.close_prices) > 0:
+            logger.debug(f"Populating {len(market_data.close_prices)} historical bars for {strategy.symbol}")
+            for i in range(len(market_data.close_prices)):
+                historical_bar = BarData(
+                    timestamp=market_data.timestamps[i],
+                    symbol=strategy.symbol,
+                    open=market_data.open_prices[i],
+                    high=market_data.high_prices[i],
+                    low=market_data.low_prices[i],
+                    close=market_data.close_prices[i],
+                    volume=market_data.volumes[i]
+                )
+                executor.strategy._add_bar(historical_bar)
+        
         bar = BarData(
             timestamp=market_data.timestamps[-1],
             symbol=strategy.symbol,

@@ -127,7 +127,7 @@ class TradingStrategy(ABC):
             
             df = self.get_dataframe()
             if df.empty:
-                return pd.Series(dtype=float)
+                return None
             
             close = df['close']
             
@@ -136,74 +136,74 @@ class TradingStrategy(ABC):
             if indicator_upper == 'RSI':
                 period = kwargs.get('period', 14)
                 result = ta.rsi(close, length=period)
-                return result if result is not None else pd.Series(dtype=float)
+                return result if result is not None else None
             
             elif indicator_upper == 'MACD':
                 fast = kwargs.get('fast', 12)
                 slow = kwargs.get('slow', 26)
                 signal = kwargs.get('signal', 9)
                 result = ta.macd(close, fast=fast, slow=slow, signal=signal)
-                return result if result is not None else pd.DataFrame()
+                return result if result is not None else None
             
             elif indicator_upper in ['SMA', 'SMA_EMA']:
                 period = kwargs.get('period', 20)
                 result = ta.sma(close, length=period)
-                return result if result is not None else pd.Series(dtype=float)
+                return result if result is not None else None
             
             elif indicator_upper == 'EMA':
                 period = kwargs.get('period', 20)
                 result = ta.ema(close, length=period)
-                return result if result is not None else pd.Series(dtype=float)
+                return result if result is not None else None
             
             elif indicator_upper == 'BB':
                 period = kwargs.get('period', 20)
                 std = kwargs.get('std', 2.0)
                 result = ta.bbands(close, length=period, std=std)
-                return result if result is not None else pd.DataFrame()
+                return result if result is not None else None
             
             elif indicator_upper == 'ATR':
                 period = kwargs.get('period', 14)
                 result = ta.atr(df['high'], df['low'], df['close'], length=period)
-                return result if result is not None else pd.Series(dtype=float)
+                return result if result is not None else None
             
             elif indicator_upper == 'STOCH':
                 period = kwargs.get('period', 14)
                 result = ta.stoch(df['high'], df['low'], df['close'], length=period)
-                return result if result is not None else pd.DataFrame()
+                return result if result is not None else None
             
             elif indicator_upper == 'ADX':
                 period = kwargs.get('period', 14)
                 result = ta.adx(df['high'], df['low'], df['close'], length=period)
-                return result if result is not None else pd.DataFrame()
+                return result if result is not None else None
             
             elif indicator_upper == 'CCI':
                 period = kwargs.get('period', 20)
                 result = ta.cci(df['high'], df['low'], df['close'], length=period)
-                return result if result is not None else pd.Series(dtype=float)
+                return result if result is not None else None
             
             elif indicator_upper == 'OBV':
                 result = ta.obv(df['close'], df['volume'])
-                return result if result is not None else pd.Series(dtype=float)
+                return result if result is not None else None
             
             elif indicator_upper == 'VWAP':
                 result = ta.vwap(df['high'], df['low'], df['close'], df['volume'])
-                return result if result is not None else pd.Series(dtype=float)
+                return result if result is not None else None
             
             elif indicator_upper == 'WILLR':
                 period = kwargs.get('period', 14)
                 result = ta.willr(df['high'], df['low'], df['close'], length=period)
-                return result if result is not None else pd.Series(dtype=float)
+                return result if result is not None else None
             
             else:
                 logger.warning(f"Unknown indicator: {indicator}")
-                return pd.Series(dtype=float)
+                return None
                 
         except ImportError:
             logger.warning("pandas_ta not installed")
-            return pd.Series(dtype=float)
+            return None
         except Exception as e:
             logger.error(f"Error calculating indicator {indicator}: {e}")
-            return pd.Series(dtype=float)
+            return None
 
 
 class StrategyExecutor:

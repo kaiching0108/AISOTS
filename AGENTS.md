@@ -576,6 +576,15 @@ self.ta('MACD', fast=12, slow=26, signal=9)
 self.ta('BB', period=20, std=2.0)
 ```
 
+**Important**: `ta()` returns `None` when there is insufficient data (< 2 bars). Always check for `None` before using:
+
+```python
+rsi = self.ta('RSI', period=14)
+if rsi is None:
+    return 'hold'  # Insufficient data, stay on hold
+rsi_value = rsi.iloc[-1]
+```
+
 ### Telegram Bot
 
 The system includes a Telegram bot for receiving user commands:

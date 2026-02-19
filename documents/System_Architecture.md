@@ -338,6 +338,15 @@ class MyStrategy(TradingStrategy):
 | `self.get_dataframe(n)` | 取得 pandas DataFrame |
 | `self.ta(指標, **參數)` | 使用 pandas_ta 計算技術指標 |
 
+> **注意**：當 K 棒數據不足（少於 2 根）時，`ta()` 回傳 `None`。策略應檢查返回值是否為 `None` 再使用。
+> 
+> ```python
+> rsi = self.ta('RSI', period=14)
+> if rsi is None:
+>     return 'hold'  # 數據不足時保持觀望
+> rsi_value = rsi.iloc[-1]
+> ```
+
 ### 4.4 pandas_ta 支援的指標
 
 | 指標 | 說明 | 參數 |
