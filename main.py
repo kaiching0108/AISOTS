@@ -418,6 +418,18 @@ class AITradingSystem:
         """透過 LLM 處理命令"""
         import json
         
+        # 檢查是否為確認關鍵詞（直接處理，避免 LLM 忘記調用工具）
+        command_stripped = command.strip().lower()
+        confirm_keywords = ["確認", "确定", "yes", "確定", "confirm", "ok", "好", "好啦", "okay"]
+        
+        if any(kw in command_stripped for kw in confirm_keywords):
+            if self.trading_tools._pending_strategy is not None:
+                # 有待確認的策略，直接調用確認函數
+                self.logger.info(f"Directly confirming strategy (keyword detected)")
+                result = self.trading_tools.confirm_create_strategy(confirmed=True)
+                self._add_to_history(command, result)
+                return result
+        
         # 取得 system prompt
         system_prompt = get_system_prompt(self.config)
         
