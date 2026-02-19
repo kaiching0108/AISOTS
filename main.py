@@ -417,6 +417,7 @@ class AITradingSystem:
     async def llm_process_command(self, command: str) -> str:
         """透過 LLM 處理命令"""
         import json
+        import re
         
         # 檢查是否為確認關鍵詞（直接處理，避免 LLM 忘記調用工具）
         command_stripped = command.strip().lower()
@@ -429,6 +430,86 @@ class AITradingSystem:
                 result = self.trading_tools.confirm_create_strategy(confirmed=True)
                 self._add_to_history(command, result)
                 return result
+        
+        # 直接處理 enable/disable 命令
+        enable_match = re.match(r'^enable\s+(\w+)$', command_stripped)
+        disable_match = re.match(r'^disable\s+(\w+)$', command_stripped)
+        
+        if enable_match:
+            strategy_id = enable_match.group(1).upper()
+            self.logger.info(f"Directly enabling strategy: {strategy_id}")
+            result = self.trading_tools.enable_strategy(strategy_id)
+            self._add_to_history(command, result)
+            return result
+        
+        if disable_match:
+            strategy_id = disable_match.group(1).upper()
+            self.logger.info(f"Directly disabling strategy: {strategy_id}")
+            result = self.trading_tools.disable_strategy(strategy_id)
+            self._add_to_history(command, result)
+            return result
+        
+        # 直接處理常見命令
+        # status
+        if command_stripped == "status":
+            result = self.trading_tools.get_system_status()
+            self._add_to_history(command, result)
+            return result
+        
+        # positions / 部位
+        if command_stripped in ["positions", "部位", "持倉"]:
+            result = self.trading_tools.get_positions()
+            self._add_to_history(command, result)
+            return result
+        
+        # strategies / 策略
+        if command_stripped in ["strategies", "策略", "策略列表"]:
+            result = self.trading_tools.get_strategies()
+            self._add_to_history(command, result)
+            return result
+        
+        # performance / 績效
+        if command_stripped in ["performance", "績效", "表現"]:
+            result = self.trading_tools.get_performance()
+            self._add_to_history(command, result)
+            return result
+        
+        # risk / 風控
+        if command_stripped in ["risk", "風控", "風險"]:
+            result = self.trading_tools.get_risk_status()
+            self._add_to_history(command, result)
+            return result
+        
+        # orders / 訂單
+        if command_stripped in ["orders", "訂單", "委託"]:
+            result = self.trading_tools.get_order_history(None)
+            self._add_to_history(command, result)
+            return result
+        
+        # new / 新對話
+        if command_stripped in ["new", "新對話", "新會話"]:
+            self.conversation_history = []
+            self._add_to_history(command, "✅ 對話歷史已清除")
+            return "✅ 對話歷史已清除"
+        
+        # help / 幫助
+        if command_stripped in ["help", "幫助", "?", "？"]:
+            result = """📋 *命令列表*
+
+🔍 基本查詢
+• status - 系統狀態
+• positions / 部位 - 目前部位
+• strategies / 策略 - 所有策略
+• performance - 當日績效
+• risk / 風控 - 風控狀態
+
+📦 策略管理
+• enable <ID> - 啟用策略
+• disable <ID> - 停用策略
+
+❓ 輸入文字描述讓 AI 幫你操作"""
+            self._add_to_history(command, result)
+            return result
         
         # 檢查是否正在等待期貨代碼輸入（_awaiting_symbol=True）
         # 如果用戶直接回覆期貨代碼，直接處理
@@ -470,6 +551,8 @@ class AITradingSystem:
         tools = self.trading_tools.get_tool_definitions()
         
         try:
+            self.logger.info(f"LLM processing command: {command}")
+            
             # 呼叫 LLM
             response = await self.llm_provider.chat_with_tools(
                 messages=messages,
@@ -479,6 +562,9 @@ class AITradingSystem:
             
             # 獲取 LLM 回覆內容
             content = response.get("content", "")
+            tool_calls = response.get("tool_calls", [])
+            
+            self.logger.info(f"LLM response - content: {content[:100] if content else 'None'}, tool_calls: {len(tool_calls)}")
             
             # 檢查是否有 tool calls
             tool_calls = response.get("tool_calls", [])

@@ -78,6 +78,13 @@ class ShioajiClient:
         if symbol in self._contracts_cache:
             return self._contracts_cache[symbol]
         
+        # 模擬模式：建立模擬合約
+        if self.simulation or self.skip_login:
+            mock_contract = self._create_mock_contract(symbol)
+            if mock_contract:
+                self._contracts_cache[symbol] = mock_contract
+                return mock_contract
+        
         try:
             # 嘗試解析合約代碼
             # 例如: TXF202301 -> TXF, 202301
@@ -96,6 +103,119 @@ class ShioajiClient:
             
         except Exception as e:
             logger.error(f"取得合約失敗 {symbol}: {e}")
+            return None
+    
+    def _create_mock_contract(self, symbol: str) -> Optional[Any]:
+        """建立模擬合約物件"""
+        try:
+            from dataclasses import dataclass
+            
+            @dataclass(frozen=True)
+            class MockContract:
+                code: str
+                symbol: str
+                name: str
+                category: str
+                delivery_month: str
+                underlying: str
+                limit_up: float
+                limit_down: float
+                margin: float
+                
+            category = symbol[:3] if len(symbol) >= 3 else symbol
+            month = symbol[3:] if len(symbol) > 3 else ""
+            
+            name_map = {
+                "TXF": "臺股期貨",
+                "MXF": "小型臺指",
+                "TMF": "微型臺指期貨",
+                "T5F": "臺灣50期貨",
+                "XIF": "非金電期貨",
+                "TE": "電子期貨"
+            }
+            
+            return MockContract(
+                code=symbol,
+                symbol=symbol,
+                name=name_map.get(category, category),
+                category=category,
+                delivery_month=month,
+                underlying=category,
+                limit_up=99999.0,
+                limit_down=0.0,
+                margin=50000.0
+            )
+        except Exception as e:
+            logger.error(f"建立模擬合約失敗 {symbol}: {e}")
+            return None
+    
+    def get_kbars(self, contract: Any, timeframe: str = "1D", count: int = 100) -> Optional[Any]:
+        """取得K線資料"""
+        if self.simulation or self.skip_login:
+            return self._generate_mock_kbars(contract, timeframe, count)
+        
+        try:
+            return self.api.kbars(contract=contract, timeout=10000)
+        except Exception as e:
+            logger.error(f"取得K線失敗: {e}")
+            return None
+    
+    def _generate_mock_kbars(self, contract: Any, timeframe: str, count: int) -> Optional[Dict[str, Any]]:
+        """產生模擬K線資料"""
+        try:
+            from datetime import datetime, timedelta
+            
+            now = datetime.now()
+            intervals = {
+                "1D": 1,
+                "1H": 24,
+                "15M": 96,
+                "5M": 288,
+                "1M": 1440,
+                "15m": 96,
+                "5m": 288,
+                "1m": 1440,
+                "1h": 24,
+                "1d": 1
+            }
+            minutes = intervals.get(timeframe.lower(), 1440)
+            
+            timestamps = []
+            opens = []
+            highs = []
+            lows = []
+            closes = []
+            volumes = []
+            
+            base_price = 18000
+            for i in range(count):
+                ts = now - timedelta(minutes=minutes * (count - i))
+                timestamps.append(int(ts.timestamp()))
+                
+                change = (hash(str(i)) % 200 - 100) / 100
+                close = base_price + change * 10
+                open_price = close + (hash(str(i * 2)) % 100 - 50) / 10
+                high = max(open_price, close) + abs(hash(str(i * 3)) % 50) / 10
+                low = min(open_price, close) - abs(hash(str(i * 4)) % 50) / 10
+                volume = 1000 + hash(str(i)) % 5000
+                
+                opens.append(open_price)
+                highs.append(high)
+                lows.append(low)
+                closes.append(close)
+                volumes.append(volume)
+            
+            return {
+                "ts": timestamps,
+                "open": opens,
+                "high": highs,
+                "low": lows,
+                "close": closes,
+                "volume": volumes
+            }
+            
+        except Exception as e:
+            logger.error(f"產生模擬K線失敗: {e}")
             return None
     
     def get_contracts_by_category(self, category: str) -> List[Any]:

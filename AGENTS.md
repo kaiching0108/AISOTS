@@ -44,9 +44,23 @@ pip install pytest pytest-asyncio
 # Run in development
 python main.py
 
+# Run in simulation mode (skip Shioaji API login, for testing)
+python main.py --simulate
+
 # Or with specific config
 python main.py --config config.yaml
+
+# Simulation + CLI mode
+python main.py --simulate --cli
 ```
+
+### Simulation Mode
+
+Using `--simulate` flag:
+- Skips Shioaji API login
+- Simulated orders fill immediately
+- Simulated positions and PnL are tracked
+- Suitable for development and testing
 
 ### Testing
 
@@ -640,3 +654,66 @@ When deleting a strategy, the following files are removed:
 | Positions | `workspace/positions/{id}_positions.json` |
 | Orders | `workspace/orders/{id}_orders.json` |
 | Signals | `workspace/signals/{id}_v*.json` |
+
+---
+
+## Fallback Command Handling
+
+### Overview
+
+The system implements a **fallback mechanism** to handle basic commands reliably without relying on LLM tool calling. This ensures commands like `enable`, `disable`, `status`, etc. always execute successfully.
+
+### Implementation
+
+The fallback is implemented in `main.py`'s `llm_process_command()` function using regex pattern matching:
+
+```python
+# Direct command handling in main.py
+enable_match = re.match(r'^enable\s+(\w+)$', command_stripped)
+disable_match = re.match(r'^disable\s+(\w+)$', command_stripped)
+
+if enable_match:
+    strategy_id = enable_match.group(1).upper()
+    result = self.trading_tools.enable_strategy(strategy_id)
+    return result
+```
+
+### Supported Commands
+
+| Command | Handler | Description |
+|---------|---------|-------------|
+| `status` | `get_system_status()` | System status |
+| `positions` / `部位` / `持倉` | `get_positions()` | Current positions |
+| `strategies` / `策略` | `get_strategies()` | All strategies |
+| `performance` / `績效` | `get_performance()` | Daily performance |
+| `risk` / `風控` / `風險` | `get_risk_status()` | Risk status |
+| `orders` / `訂單` | `get_order_history()` | Order history |
+| `new` / `新對話` | `clear_history()` | Clear conversation |
+| `help` / `幫助` | `show_help()` | Show help |
+| `enable <ID>` | `enable_strategy()` | Enable strategy |
+| `disable <ID>` | `disable_strategy()` | Disable strategy |
+
+### Design Principles
+
+1. **Simple, explicit commands** → Fallback handles directly
+2. **Complex natural language** → Pass to LLM (e.g., creating strategies)
+
+### Advantages
+
+- **Reliability**: Basic commands always execute
+- **Speed**: Direct function calls are faster than LLM inference
+- **Fault tolerance**: Complex commands still handled by LLM
+
+### Adding New Fallback Commands
+
+To add a new fallback command in `main.py`:
+
+```python
+# Add regex pattern matching
+new_cmd_match = re.match(r'^newcommand$', command_stripped)
+
+if new_cmd_match:
+    result = self.trading_tools.new_command_function()
+    self._add_to_history(command, result)
+    return result
+```

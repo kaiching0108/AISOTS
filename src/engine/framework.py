@@ -115,18 +115,19 @@ class TradingStrategy(ABC):
         """使用 pandas_ta 計算技術指標
         
         Args:
-            indicator: 指標名稱 (如 RSI, MACD, BB, SMA, EMA 等)
+            indicator: 指Name (如 RSI, MACD, BB, SMA, EMA 等)
             **kwargs: 指標參數
             
         Returns:
-            指標結果 Series 或 DataFrame
+            指結果 Series 或 DataFrame
         """
         try:
+            import pandas as pd
             import pandas_ta as ta
             
             df = self.get_dataframe()
             if df.empty:
-                return None
+                return pd.Series(dtype=float)
             
             close = df['close']
             
@@ -134,63 +135,75 @@ class TradingStrategy(ABC):
             
             if indicator_upper == 'RSI':
                 period = kwargs.get('period', 14)
-                return ta.rsi(close, length=period)
+                result = ta.rsi(close, length=period)
+                return result if result is not None else pd.Series(dtype=float)
             
             elif indicator_upper == 'MACD':
                 fast = kwargs.get('fast', 12)
                 slow = kwargs.get('slow', 26)
                 signal = kwargs.get('signal', 9)
-                return ta.macd(close, fast=fast, slow=slow, signal=signal)
+                result = ta.macd(close, fast=fast, slow=slow, signal=signal)
+                return result if result is not None else pd.DataFrame()
             
             elif indicator_upper in ['SMA', 'SMA_EMA']:
                 period = kwargs.get('period', 20)
-                return ta.sma(close, length=period)
+                result = ta.sma(close, length=period)
+                return result if result is not None else pd.Series(dtype=float)
             
             elif indicator_upper == 'EMA':
                 period = kwargs.get('period', 20)
-                return ta.ema(close, length=period)
+                result = ta.ema(close, length=period)
+                return result if result is not None else pd.Series(dtype=float)
             
             elif indicator_upper == 'BB':
                 period = kwargs.get('period', 20)
                 std = kwargs.get('std', 2.0)
-                return ta.bbands(close, length=period, std=std)
+                result = ta.bbands(close, length=period, std=std)
+                return result if result is not None else pd.DataFrame()
             
             elif indicator_upper == 'ATR':
                 period = kwargs.get('period', 14)
-                return ta.atr(df['high'], df['low'], df['close'], length=period)
+                result = ta.atr(df['high'], df['low'], df['close'], length=period)
+                return result if result is not None else pd.Series(dtype=float)
             
             elif indicator_upper == 'STOCH':
                 period = kwargs.get('period', 14)
-                return ta.stoch(df['high'], df['low'], df['close'], length=period)
+                result = ta.stoch(df['high'], df['low'], df['close'], length=period)
+                return result if result is not None else pd.DataFrame()
             
             elif indicator_upper == 'ADX':
                 period = kwargs.get('period', 14)
-                return ta.adx(df['high'], df['low'], df['close'], length=period)
+                result = ta.adx(df['high'], df['low'], df['close'], length=period)
+                return result if result is not None else pd.DataFrame()
             
             elif indicator_upper == 'CCI':
                 period = kwargs.get('period', 20)
-                return ta.cci(df['high'], df['low'], df['close'], length=period)
+                result = ta.cci(df['high'], df['low'], df['close'], length=period)
+                return result if result is not None else pd.Series(dtype=float)
             
             elif indicator_upper == 'OBV':
-                return ta.obv(df['close'], df['volume'])
+                result = ta.obv(df['close'], df['volume'])
+                return result if result is not None else pd.Series(dtype=float)
             
             elif indicator_upper == 'VWAP':
-                return ta.vwap(df['high'], df['low'], df['close'], df['volume'])
+                result = ta.vwap(df['high'], df['low'], df['close'], df['volume'])
+                return result if result is not None else pd.Series(dtype=float)
             
             elif indicator_upper == 'WILLR':
                 period = kwargs.get('period', 14)
-                return ta.willr(df['high'], df['low'], df['close'], length=period)
+                result = ta.willr(df['high'], df['low'], df['close'], length=period)
+                return result if result is not None else pd.Series(dtype=float)
             
             else:
                 logger.warning(f"Unknown indicator: {indicator}")
-                return None
+                return pd.Series(dtype=float)
                 
         except ImportError:
             logger.warning("pandas_ta not installed")
-            return None
+            return pd.Series(dtype=float)
         except Exception as e:
             logger.error(f"Error calculating indicator {indicator}: {e}")
-            return None
+            return pd.Series(dtype=float)
 
 
 class StrategyExecutor:
@@ -204,6 +217,11 @@ class StrategyExecutor:
         self.strategy._add_bar(bar)
         
         try:
+            bars_count = len(self.strategy._bars)
+            df = self.strategy.get_dataframe()
+            df_empty = df.empty if df is not None else "None"
+            logger.debug(f"execute_bar: bars={bars_count}, df_empty={df_empty}")
+            
             signal = self.strategy.on_bar(bar)
             
             if signal in [SIGNAL_BUY, SIGNAL_SELL, SIGNAL_CLOSE, SIGNAL_HOLD]:
@@ -213,7 +231,9 @@ class StrategyExecutor:
             return SIGNAL_HOLD
             
         except Exception as e:
+            import traceback
             logger.error(f"Error executing strategy on_bar: {e}")
+            logger.error(f"Stack trace: {traceback.format_exc()}")
             return SIGNAL_HOLD
     
     def on_fill(self, fill: FillData) -> None:

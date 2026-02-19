@@ -193,10 +193,15 @@ K線週期: {strategy.params.get('timeframe', 'N/A')}
     
     def enable_strategy(self, strategy_id: str) -> str:
         """啟用策略"""
+        logger.info(f"Enable strategy called: {strategy_id}")
+        
         # 找到要 enable 的策略
         strategy = self.strategy_mgr.get_strategy(strategy_id)
         if not strategy:
+            logger.error(f"Strategy not found: {strategy_id}")
             return f"❌ 找不到策略: {strategy_id}"
+        
+        logger.info(f"Found strategy: {strategy.name}, current enabled: {strategy.enabled}")
         
         # 檢查同一 symbol 是否有其他版本已 enable
         same_symbol_strategies = [
@@ -211,6 +216,7 @@ K線週期: {strategy.params.get('timeframe', 'N/A')}
         
         # enable 當前策略
         success = self.strategy_mgr.enable_strategy(strategy_id)
+        logger.info(f"Enable result: {success}")
         
         if success:
             params = strategy.params or {}
@@ -1648,6 +1654,20 @@ Shioaji: {'✅ 連線' if conn_status else '❌ 斷線'}
             {
                 "type": "function",
                 "function": {
+                    "name": "confirm_disable_strategy",
+                    "description": "確認停用策略 (當用戶說「確認停用」或「confirm disable」時調用，若有部位會強制平倉)",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "strategy_id": {"type": "string", "description": "策略ID"}
+                        },
+                        "required": ["strategy_id"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
                     "name": "get_position_by_strategy",
                     "description": "取得指定策略的部位",
                     "parameters": {
@@ -1787,6 +1807,7 @@ Shioaji: {'✅ 連線' if conn_status else '❌ 斷線'}
             "get_market_data": lambda: self.get_market_data(arguments.get("symbol", "")),
             "enable_strategy": lambda: self.enable_strategy(arguments.get("strategy_id", "")),
             "disable_strategy": lambda: self.disable_strategy(arguments.get("strategy_id", "")),
+            "confirm_disable_strategy": lambda: self.confirm_disable_strategy(arguments.get("strategy_id", "")),
             "get_position_by_strategy": lambda: self.get_position_by_strategy(arguments.get("strategy_id", "")),
             "create_strategy": lambda: self.create_strategy(
                 name=arguments.get("name", ""),

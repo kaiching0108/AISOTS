@@ -210,6 +210,8 @@ class StrategyStore(JSONStore):
         """啟用策略"""
         strategy = self.load_strategy(strategy_id)
         if strategy:
+            if isinstance(strategy, list) and len(strategy) > 0:
+                strategy = strategy[0]
             strategy["enabled"] = True
             self.save_strategy(strategy)
             return True
@@ -219,6 +221,8 @@ class StrategyStore(JSONStore):
         """停用策略"""
         strategy = self.load_strategy(strategy_id)
         if strategy:
+            if isinstance(strategy, list) and len(strategy) > 0:
+                strategy = strategy[0]
             strategy["enabled"] = False
             self.save_strategy(strategy)
             return True
