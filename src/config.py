@@ -79,13 +79,6 @@ class StrategyConfig(BaseModel):
     goal_unit: Optional[str] = "daily"
 
 
-class LoggingConfig(BaseModel):
-    level: str = "INFO"
-    file: str = "workspace/logs/trading.log"
-    max_bytes: int = 10485760
-    backup_count: int = 5
-
-
 class AutoReviewSchedule(BaseModel):
     """自動 LLM Review 排程設定"""
     strategy_id: str
@@ -106,7 +99,6 @@ class AppConfig(BaseModel):
     risk: RiskConfig
     trading: TradingConfig
     strategies: list[StrategyConfig] = []
-    logging: LoggingConfig
     auto_review: AutoReviewConfig = AutoReviewConfig()
 
 

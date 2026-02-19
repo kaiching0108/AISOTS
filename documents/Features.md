@@ -10,22 +10,11 @@ python main.py
 
 # 模擬模式（跳過 API 登入，用於測試）
 python main.py --simulate
-
-# CLI 模式（本地命令行操作）
-python main.py --cli
-
-# 模擬 + CLI 模式
-python main.py --simulate --cli
-
-# 指定配置文件
-python main.py --config custom.yaml
 ```
 
 | 參數 | 說明 |
 |------|------|
 | `--simulate` | 模擬模式，跳過 Shioaji API 登入 |
-| `--cli` | 啟用本地命令行界面 |
-| `--config` | 指定配置文件路徑 |
 
 ---
 

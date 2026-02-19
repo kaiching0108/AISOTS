@@ -46,12 +46,6 @@ python main.py
 
 # Run in simulation mode (skip Shioaji API login, for testing)
 python main.py --simulate
-
-# Or with specific config
-python main.py --config config.yaml
-
-# Simulation + CLI mode
-python main.py --simulate --cli
 ```
 
 ### Simulation Mode

@@ -38,13 +38,6 @@ trading:
     night_start: "15:00"
     night_end: "05:00"
 
-# 日誌配置
-logging:
-  level: "INFO"
-  file: "workspace/logs/trading.log"
-  max_bytes: 10485760  # 10MB
-  backup_count: 5
-
 # 自動 LLM Review 排程
 # 說明：
 # - enabled: 是否啟用自動 review

@@ -131,15 +131,6 @@ python main.py
 
 # 模擬模式（跳過 API 登入，用於測試）
 python main.py --simulate
-
-# CLI 模式（本地命令行操作）
-python main.py --cli
-
-# 模擬 + CLI 模式
-python main.py --simulate --cli
-
-# 指定配置文件
-python main.py --config custom.yaml
 ```
 
 #### 命令行參數說明
@@ -148,8 +139,6 @@ python main.py --config custom.yaml
 |------|------|------|
 | `command` | 命令 (預設: start) | `start` |
 | `--simulate` | 模擬模式，跳過 Shioaji API 登入 | |
-| `--cli` | 啟用本地命令行界面 | |
-| `--config` | 指定配置文件路徑 | `--config myconfig.yaml` |
 
 #### 模擬模式說明
 
@@ -158,13 +147,6 @@ python main.py --config custom.yaml
 - 模擬下單會立即成交
 - 模擬部位和損益會被追蹤
 - 適合開發測試使用
-
-#### CLI 模式說明
-
-使用 `--cli` 參數時：
-- 啟動本地命令行界面
-- 無需 Telegram Bot 也能操作系統
-- 適合無法使用 Telegram 的環境
 
 成功啟動後會看到類似輸出：
 
@@ -857,9 +839,6 @@ auto_review:
 ```bash
 # 模擬模式
 python main.py --simulate
-
-# 模擬 + CLI 模式（無需 Telegram）
-python main.py --simulate --cli
 ```
 
 模擬模式下：
@@ -952,7 +931,7 @@ python main.py             # 正常模式（需要 API 登入）
 
 使用模擬模式：
 ```bash
-python main.py --simulate --cli
+python main.py --simulate
 ```
 
 這樣可以在沒有 Shioaji API 的情況下測試系統功能。
