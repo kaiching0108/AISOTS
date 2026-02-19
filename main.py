@@ -430,6 +430,28 @@ class AITradingSystem:
                 self._add_to_history(command, result)
                 return result
         
+        # 檢查是否正在等待期貨代碼輸入（_awaiting_symbol=True）
+        # 如果用戶直接回覆期貨代碼，直接處理
+        if self.trading_tools._awaiting_symbol and self.trading_tools._pending_strategy is None:
+            # 提取可能的期貨代碼
+            user_input = command.strip().upper()
+            valid_symbols = self.trading_tools._valid_symbols if hasattr(self.trading_tools, '_valid_symbols') else []
+            
+            # 檢查用戶輸入是否包含有效的期貨代碼
+            found_symbol = None
+            for symbol in valid_symbols:
+                if symbol in user_input:
+                    found_symbol = symbol
+                    break
+            
+            if found_symbol:
+                # 直接調用 create_strategy_by_goal
+                self.logger.info(f"Directly processing futures code: {found_symbol}")
+                goal = self.trading_tools._current_goal or "建立策略"
+                result = self.trading_tools.create_strategy_by_goal(goal, found_symbol)
+                self._add_to_history(command, result)
+                return result
+        
         # 取得 system prompt
         system_prompt = get_system_prompt(self.config)
         
