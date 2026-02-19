@@ -542,7 +542,106 @@ workspace/
 
 ---
 
-## 11. 自我優化 AI 交易系統
+## 10. Telegram Markdown 清理機制
+
+### 10.1 功能說明
+
+系統在發送訊息到 Telegram 之前，會自動清理 Markdown 格式，確保訊息正確顯示。
+
+### 10.2 處理項目
+
+| 項目 | 處理方式 | 範例 |
+|------|----------|------|
+| 粗體 | 移除 ** 標記 | **text** → text |
+| 斜體 | 移除 * 標記 | *text* → text |
+| 標題 | 移除 # 標記 | ### 標題 → 標題 |
+| 表格 | 轉換為清單格式 | \| A \| B \| → • A \| B |
+| 分隔線 | 移除 --- 改為 ─ | --- → ───────────── |
+| 多餘空行 | 移除過多空行 | 3行以上 → 2行 |
+
+### 10.3 使用位置
+
+此機制在以下位置自動觸發：
+
+| 位置 | 說明 |
+|------|------|
+| `TelegramNotifier.send_message()` | 發送訊息前 |
+| `TelegramNotifier.send_photo()` | 發送圖片說明前 |
+| `TradingTools._clean_markdown_for_telegram()` | 工具回傳結果前 |
+| `llm_process_command()` | 處理命令錯誤時 |
+
+---
+
+## 11. 直接處理輸入優化
+
+### 11.1 設計背景
+
+傳統 LLM Agent 依賴工具調用（Tool Calling），但有時 LLM 會忘記調用工具或錯誤判斷用戶意圖。系統透過 **Fallback 機制** 直接處理常見輸入，確保執行成功。
+
+### 11.2 直接處理的輸入
+
+#### A. 確認關鍵詞
+
+當用戶輸入以下關鍵詞且有待確認的策略時，直接調用 `confirm_create_strategy`：
+
+| 關鍵詞 | 語言 |
+|--------|------|
+| 確認、確定、ok、好、好啦、okay | 中文 |
+| confirm、yes | 英文 |
+
+```python
+# main.py 中的實現
+confirm_keywords = ["確認", "確定", "yes", "確定", "confirm", "ok", "好", "好啦", "okay"]
+
+if any(kw in command_stripped for kw in confirm_keywords):
+    if self.trading_tools._pending_strategy is not None:
+        result = self.trading_tools.confirm_create_strategy(confirmed=True)
+```
+
+#### B. 期貨代碼輸入
+
+當用戶正在等待期貨代碼輸入（如 LLM 詢問「請問要使用哪個期貨合約？」），用戶直接回覆期貨代碼時：
+
+| 用戶輸入 | 系統行為 |
+|---------|----------|
+| TXF | 直接建立策略 |
+| MXF | 直接建立策略 |
+| TMF | 直接建立策略 |
+
+```python
+# main.py 中的實現
+if self.trading_tools._awaiting_symbol and self.trading_tools._pending_strategy is None:
+    # 提取期貨代碼並直接調用 create_strategy_by_goal
+    result = self.trading_tools.create_strategy_by_goal(goal, found_symbol)
+```
+
+#### C. 策略啟用/停用命令
+
+使用正則表達式直接處理 `enable` 和 `disable` 命令：
+
+```python
+enable_match = re.match(r'^enable\s+(\w+)$', command_stripped)
+disable_match = re.match(r'^disable\s+(\w+)$', command_stripped)
+```
+
+### 11.3 設計原則
+
+| 輸入類型 | 處理方式 |
+|---------|----------|
+| 簡單明確的命令 | Fallback 直接處理（確認、enable/disable、期貨代碼） |
+| 複雜自然語言 | 交給 LLM 處理（建立策略、修改策略） |
+| 查詢命令 | Fallback 直接處理（positions、strategies、performance） |
+
+### 11.4 優勢
+
+1. **可靠性**：基本命令 100% 執行成功，不依賴 LLM 工具調用
+2. **速度**：直接函數調用比 LLM 推理更快
+3. **使用者體驗**：減少對話次數，更快速回應
+4. **容錯**：複雜的自然語言仍交給 LLM 處理
+
+---
+
+## 12. 自我優化 AI 交易系統
 
 ### 11.1 系統願景
 
@@ -1047,3 +1146,4 @@ auto_review:
 | 3.4.0 | 2026-02 | 新增版本化訊號儲存，策略更新時自動遞增版本 |
 | 3.5.0 | 2026-02 | 重構儲存系統，採用 per-strategy 結構 |
 | 3.6.0 | 2026-02 | 新增 Fallback 命令處理機制，確保基本命令執行成功 |
+| 3.7.0 | 2026-02 | 新增 Markdown 清理機制與直接處理輸入優化（確認關鍵詞、期貨代碼） |
