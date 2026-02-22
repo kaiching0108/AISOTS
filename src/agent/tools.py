@@ -47,6 +47,11 @@ class TradingTools:
         self._awaiting_confirm: bool = False
         self._current_goal: Optional[str] = None
         
+        # 手動建立策略 Q&A 流程狀態
+        self._awaiting_create_input: bool = False
+        self._create_step: str = ""  # name, symbol, prompt, timeframe, quantity, stop_loss, take_profit, confirm
+        self._pending_create_data: Dict[str, Any] = {}
+        
         self._pending_optimization: Optional[Dict[str, Any]] = None
         
         self._signal_recorder = None
@@ -867,6 +872,220 @@ K線週期: {params['timeframe']}
         self._awaiting_symbol = False
         self._awaiting_confirm = False
         self._current_goal = None
+        self._clear_create_flow()
+    
+    def _clear_create_flow(self) -> None:
+        """清除手動建立策略 Q&A 流程狀態"""
+        self._awaiting_create_input = False
+        self._create_step = ""
+        self._pending_create_data = {}
+    
+    def start_create_flow(self) -> str:
+        """開始手動建立策略 Q&A 流程"""
+        self._awaiting_create_input = True
+        self._create_step = "name"
+        self._pending_create_data = {}
+        return """📝 *手動建立策略*
+────────────────
+請依序輸入以下資訊：
+
+*第一步：策略名稱*
+請輸入策略名稱（如：RSI策略、均線策略）
+        
+輸入「取消」可中止建立流程"""
+    
+    def handle_create_input(self, user_input: str) -> str:
+        """處理手動建立策略的輸入
+        
+        Args:
+            user_input: 用戶輸入
+            
+        Returns:
+            str: 回應訊息
+        """
+        user_input = user_input.strip()
+        
+        if user_input in ["取消", "cancel", "abort"]:
+            self._clear_create_flow()
+            return "❌ 已取消建立策略"
+        
+        if self._create_step == "name":
+            self._pending_create_data["name"] = user_input
+            self._create_step = "symbol"
+            return """📝 *第二步：期貨代碼*
+────────────────
+請輸入期貨代碼：
+TXF - 臺股期貨
+MXF - 小型臺指
+TMF - 微型臺指
+T5F - 臺灣50期貨
+XIF - 非金電期貨
+TE - 電子期貨
+        
+請輸入代碼（如：TXF）"""
+        
+        elif self._create_step == "symbol":
+            symbol = user_input.upper()
+            valid_symbols = ["TXF", "MXF", "TMF", "T5F", "XIF", "TE"]
+            if symbol not in valid_symbols:
+                return f"❌ 無效的期貨代碼，請輸入：{', '.join(valid_symbols)}"
+            self._pending_create_data["symbol"] = symbol
+            self._create_step = "prompt"
+            return """📝 *第三步：策略描述*
+────────────────
+請輸入策略描述（例如：RSI低於30買入高於70賣出）"""
+        
+        elif self._create_step == "prompt":
+            self._pending_create_data["prompt"] = user_input
+            self._create_step = "timeframe"
+            return """📝 *第四步：K線週期*
+────────────────
+請輸入K線週期：
+1m  - 1分鐘
+5m  - 5分鐘
+15m - 15分鐘
+30m - 30分鐘
+60m - 60分鐘
+1h  - 1小時
+1d  - 1天
+        
+請輸入週期（如：15m）"""
+        
+        elif self._create_step == "timeframe":
+            timeframe = user_input.lower().strip()
+            valid_timeframes = ["1m", "5m", "15m", "30m", "60m", "1h", "1d"]
+            if timeframe not in valid_timeframes:
+                return f"❌ 無效的K線週期，請輸入：{', '.join(valid_timeframes)}"
+            self._pending_create_data["timeframe"] = timeframe
+            self._create_step = "quantity"
+            return """📝 *第五步：交易口數*
+────────────────
+請輸入每次交易的口數（預設：1）"""
+        
+        elif self._create_step == "quantity":
+            try:
+                quantity = int(user_input)
+                if quantity < 1:
+                    return "❌ 數量必須 >= 1，請重新輸入"
+                self._pending_create_data["quantity"] = quantity
+            except ValueError:
+                return "❌ 請輸入有效的數字"
+            self._create_step = "stop_loss"
+            return """📝 *第六步：停損點數*
+────────────────
+請輸入停損點數（設為 0 表示不啟用停損）"""
+        
+        elif self._create_step == "stop_loss":
+            try:
+                stop_loss = int(user_input)
+                if stop_loss < 0:
+                    return "❌ 停損不能為負數，請重新輸入"
+                self._pending_create_data["stop_loss"] = stop_loss
+            except ValueError:
+                return "❌ 請輸入有效的數字"
+            self._create_step = "take_profit"
+            return """📝 *第七步：止盈點數*
+────────────────
+請輸入止盈點數（設為 0 表示不啟用止盈）"""
+        
+        elif self._create_step == "take_profit":
+            try:
+                take_profit = int(user_input)
+                if take_profit < 0:
+                    return "❌ 止盈不能為負數，請重新輸入"
+                self._pending_create_data["take_profit"] = take_profit
+            except ValueError:
+                return "❌ 請輸入有效的數字"
+            self._create_step = "confirm"
+            return self._get_create_confirm_message()
+        
+        elif self._create_step == "confirm":
+            if user_input in ["確認", "yes", "y", "確定", "好", "ok"]:
+                return self._execute_create_strategy()
+            elif user_input in ["取消", "no", "n", "不要"]:
+                self._clear_create_flow()
+                return "❌ 已取消建立策略"
+            else:
+                return "請輸入「確認」建立策略，或「取消」放棄"
+        
+        return "❌ 發生錯誤，請重新輸入「create」開始"
+    
+    def _get_create_confirm_message(self) -> str:
+        """取得建立策略確認訊息"""
+        data = self._pending_create_data
+        return f"""📝 *第八步：確認建立*
+────────────────
+請確認以下資訊：
+
+📌 策略名稱：{data.get('name', 'N/A')}
+📌 期貨代碼：{data.get('symbol', 'N/A')}
+📌 策略描述：{data.get('prompt', 'N/A')}
+📌 K線週期：{data.get('timeframe', 'N/A')}
+📌 交易口數：{data.get('quantity', 1)}
+📌 停損點數：{data.get('stop_loss', 0)}
+📌 止盈點數：{data.get('take_profit', 0)}
+
+────────────────
+請輸入「確認」建立策略，或「取消」放棄"""
+    
+    def _execute_create_strategy(self) -> str:
+        """執行建立策略"""
+        import asyncio
+        from src.trading.strategy import Strategy
+        
+        data = self._pending_create_data
+        strategy_id = self._generate_strategy_id(data["symbol"])
+        
+        strategy = Strategy(
+            strategy_id=strategy_id,
+            name=data["name"],
+            symbol=data["symbol"],
+            prompt=data["prompt"],
+            params={
+                "timeframe": data["timeframe"],
+                "quantity": data["quantity"],
+                "stop_loss": data["stop_loss"],
+                "take_profit": data["take_profit"]
+            },
+            enabled=False
+        )
+        
+        self.strategy_mgr.add_strategy(strategy)
+        
+        verify_result = asyncio.run(self._verify_strategy_at_creation(strategy))
+        
+        self.strategy_mgr.store.save_strategy(strategy.to_dict())
+        
+        self._clear_create_flow()
+        
+        if verify_result["passed"]:
+            verification_text = f"✅ 驗證狀態：通過"
+        else:
+            verification_text = f"❌ 驗證狀態：失敗\n原因：{verify_result.get('error', '未知錯誤')}"
+        
+        return f"""✅ 策略已建立（停用中）
+{'='*30}
+
+📌 基本資訊
+ID: {strategy_id}
+名稱: {data['name']}
+期貨: {data['symbol']}
+K線週期: {data['timeframe']}
+口數: {data['quantity']}
+
+📊 風險控制
+停損: {data['stop_loss']}點
+止盈: {data['take_profit']}點
+
+📝 策略描述
+{data['prompt']}
+
+{'='*30}
+{verification_text}
+
+{'='*30}
+⚠️ 策略已建立但尚未啟用！
+請說「啟用 {strategy_id}」開始交易"""
     
     async def _verify_strategy_at_creation(self, strategy) -> dict:
         """策略建立時自動驗證

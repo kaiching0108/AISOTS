@@ -16,8 +16,9 @@ SIGNAL_HOLD = "hold"
 class MarketData:
     """市場數據結構"""
     
-    def __init__(self, symbol: str):
+    def __init__(self, symbol: str, timeframe: str = "15m"):
         self.symbol = symbol
+        self.timeframe = timeframe
         self.close_prices: List[float] = []
         self.high_prices: List[float] = []
         self.low_prices: List[float] = []

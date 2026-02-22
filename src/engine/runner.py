@@ -118,6 +118,11 @@ class StrategyRunner:
             logger.warning(f"Strategy not found: {strategy_id}")
             return False
         
+        # 清除該 symbol 的市場資料快取，確保使用正確的 timeframe
+        if strategy.symbol in self.market_data_cache:
+            del self.market_data_cache[strategy.symbol]
+            logger.info(f"Cleared market data cache for {strategy.symbol} before starting strategy")
+        
         if not strategy.enabled:
             logger.warning(f"Strategy not enabled: {strategy.name}")
             return False

@@ -705,6 +705,7 @@ if enable_match:
 
 | Command | Handler | Description |
 |---------|---------|-------------|
+| `create` | `start_create_flow()` | Q&A style strategy creation |
 | `status` | `get_system_status()` | System status |
 | `positions` / `部位` / `持倉` | `get_positions()` | Current positions |
 | `strategies` / `策略` | `get_strategies()` | All strategies |
@@ -718,14 +719,29 @@ if enable_match:
 
 ### Design Principles
 
-1. **Simple, explicit commands** → Fallback handles directly
-2. **Complex natural language** → Pass to LLM (e.g., creating strategies)
+1. **Explicit English commands** → Fallback handles directly
+2. **Goal-driven strategy creation** → Pass to LLM
+3. **Strategy discussion** → Pass to LLM
+
+### Strategy Modification
+
+**Method 1: Modify parameters during creation**
+During goal-driven strategy creation confirmation, user can modify parameters:
+- "停損改成50點" (change stop loss to 50 points)
+- "止盈改成100點" (change take profit to 100 points)
+- "週期改成15m" (change timeframe to 15m)
+
+**Method 2: Modify strategy prompt after creation**
+After strategy is created, user can discuss with LLM to modify strategy:
+- Discuss strategy logic
+- LLM automatically updates prompt and increments version
+- Old version signals archived, new version signals recorded
 
 ### Advantages
 
 - **Reliability**: Basic commands always execute
 - **Speed**: Direct function calls are faster than LLM inference
-- **Fault tolerance**: Complex commands still handled by LLM
+- **Stability**: Excludes LLM tool calling instability
 
 ### Adding New Fallback Commands
 

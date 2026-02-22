@@ -725,19 +725,28 @@ class AITradingSystem:
     
     def fallback_handle_command(self, command: str) -> str:
         """Fallback 命令處理 (當 LLM 失敗時)"""
-        command = command.strip().lower()
+        command = command.strip()
+        command_lower = command.lower()
+        
+        # 檢查是否在建立策略 Q&A 流程中
+        if self.trading_tools._awaiting_create_input:
+            return self.trading_tools.handle_create_input(command)
+        
+        # 建立策略 Q&A 流程
+        if command_lower == "create":
+            return self.trading_tools.start_create_flow()
         
         # 解析命令
-        if command in ["status", "狀態", "系統狀態"]:
+        if command_lower in ["status", "狀態", "系統狀態"]:
             return self.trading_tools.get_system_status()
         
-        elif command in ["positions", "部位", "持倉"]:
+        elif command_lower in ["positions", "部位", "持倉"]:
             return self.trading_tools.get_positions()
         
-        elif command in ["strategies", "策略"]:
+        elif command_lower in ["strategies", "策略"]:
             return self.trading_tools.get_strategies()
         
-        elif command in ["performance", "績效"]:
+        elif command_lower in ["performance", "績效"]:
             return self.trading_tools.get_performance()
         
         elif command.startswith("performance "):
@@ -756,10 +765,10 @@ class AITradingSystem:
             
             return self.trading_tools.get_strategy_performance(strategy_id, period)
         
-        elif command in ["risk", "風控"]:
+        elif command_lower in ["risk", "風控"]:
             return self.trading_tools.get_risk_status()
         
-        elif command in ["orders", "訂單"]:
+        elif command_lower in ["orders", "訂單"]:
             return self.trading_tools.get_order_history()
         
         elif command.startswith("enable "):
@@ -774,16 +783,16 @@ class AITradingSystem:
             strategy_id = command.split(" ", 1)[1]
             return self.trading_tools.confirm_disable_strategy(strategy_id)
         
-        elif command in ["cancel", "取消"]:
+        elif command_lower in ["cancel", "取消"]:
             return "已取消操作"
         
-        elif command in ["確認", "确定", "yes", "確定"]:
+        elif command_lower in ["確認", "确定", "yes", "確定"]:
             # 確認建立策略
             if self.trading_tools._pending_strategy:
                 return self.trading_tools.confirm_create_strategy(confirmed=True)
             return "沒有待確認的策略"
         
-        elif command in ["否", "no", "不要"]:
+        elif command_lower in ["否", "no", "不要"]:
             # 取消建立策略
             if self.trading_tools._pending_strategy:
                 return self.trading_tools.confirm_create_strategy(confirmed=False)
