@@ -15,7 +15,7 @@
 ## 安裝
 
 ```bash
-git clone https://github.com/kaiching0108/ai_futures_trading.git
+git clone https://github.com/kaiching0108/AISOTS.git
 cd ai_futures_trading
 pip install -r requirements.txt
 ```
