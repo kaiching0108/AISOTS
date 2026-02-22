@@ -91,7 +91,7 @@ if command_stripped in ["positions", "部位", "持倉"]:
 
 | 特性 | 說明 |
 |------|------|
-| 策略 ID | 自動生成 (如 MXFA01, TXFZZZ)，格式：期貨代碼+3位隨機字符 |
+| 策略 ID | 自動生成 (如 TMF260001, TXF260001)，格式：期貨代碼+年份後2碼+4位數字 |
 | 策略名稱 | 自定義名稱 |
 | 期貨合約 | 綁定特定期貨 (TXF/MXF/TMF) |
 | 期貨代碼中文名稱 | 從 Shioaji API 動態取得（如 TMF = 微型臺指期貨） |
@@ -104,7 +104,7 @@ if command_stripped in ["positions", "部位", "持倉"]:
 
 #### 策略 ID 系統
 
-- **格式**：`{期貨代碼}{3位隨機字符}`（如 `MXFA01`, `TXFZZZ`, `EFF12X`）
+- **格式**：`{期貨代碼}{年份後2碼}{4位數字}`（如 `TMF260001`, `TXF260001`, `EFF260001`）
 - **自動生成**：建立策略時自動產生，無需手動指定
 - **同合約互斥**：同一期貨代碼只能有一個啟用的策略
 - **自動停用**：啟用新版本時，自動停用同代碼的舊版本
@@ -461,7 +461,7 @@ telegram:
 strategies: []  # 系統不從這裡載入策略，改用 Telegram 對話建立
 ```
 
-**注意**：系統採用對話式策略建立，策略 ID 會自動生成（如 MXFA01）。
+**注意**：系統採用對話式策略建立，策略 ID 會自動生成（如 TMF260001）。
 
 ---
 
@@ -474,18 +474,18 @@ strategies: []  # 系統不從這裡載入策略，改用 Telegram 對話建立
 ```
 workspace/
 ├── strategies/           # 策略（per-strategy + versioning）
-│   ├── MXFA01_v1.json    # 策略 ID：期貨代碼 + 3位隨機字符
-│   ├── MXFA01_v2.json
+│   ├── TMF260001_v1.json    # 策略 ID：期貨代碼 + 年份後2碼 + 4位數字
+│   ├── TMF260001_v2.json
 │   └── ...
 ├── positions/           # 部位（per-strategy）
-│   ├── MXFA01_positions.json
+│   ├── TMF260001_positions.json
 │   └── ...
 ├── orders/             # 訂單（per-strategy）
-│   ├── MXFA01_orders.json
+│   ├── TMF260001_orders.json
 │   └── ...
 ├── signals/            # 訊號（per-strategy + versioning）
-│   ├── MXFA01_v1.json
-│   ├── MXFA01_v2.json
+│   ├── TMF260001_v1.json
+│   ├── TMF260001_v2.json
 │   └── ...
 └── performance.json
 ```
@@ -668,7 +668,7 @@ disable_match = re.match(r'^disable\s+(\w+)$', command_stripped)
 ```yaml
 # 系統採用對話式策略建立，config.yaml 中的 strategies 欄位已移除
 # 策略目標透過 Telegram 命令設定：goal <ID> <金額> <單位>
-# 例如：goal MXFA01 500 daily
+# 例如：goal TMF260001 500 daily
 ```
 
 ### 11.3 訊號記錄系統
@@ -698,20 +698,20 @@ disable_match = re.match(r'^disable\s+(\w+)$', command_stripped)
 ```
 workspace/
 ├── strategies/           # 策略（per-strategy + versioning）
-│   ├── MXFA01_v1.json
-│   ├── MXFA01_v2.json
+│   ├── TMF260001_v1.json
+│   ├── TMF260001_v2.json
 │   └── ...
 ├── positions/          # 部位（per-strategy）
-│   ├── MXFA01_positions.json
+│   ├── TMF260001_positions.json
 │   ├── TXF01_positions.json
 │   └── ...
 ├── orders/             # 訂單（per-strategy）
-│   ├── MXFA01_orders.json
+│   ├── TMF260001_orders.json
 │   ├── TXF01_orders.json
 │   └── ...
 ├── signals/            # 訊號（per-strategy + versioning）
-│   ├── MXFA01_v1.json
-│   ├── MXFA01_v2.json
+│   ├── TMF260001_v1.json
+│   ├── TMF260001_v2.json
 │   └── ...
 └── performance.json
 ```
@@ -736,7 +736,7 @@ workspace/
 
 ```json
 {
-    "strategy_id": "MXFA01",
+    "strategy_id": "TMF260001",
     "strategy_version": 2,
     "signal_id": "sig_abc123...",
     ...
@@ -761,11 +761,11 @@ workspace/
 LLM Review 和績效查詢預設分析**最新版本**的訊號，確保分析結果反映當前策略的實際表現。
 
 ```
-performance MXFA01 month
-→ 分析 MXFA01_v2.json (最新版本)
+performance TMF260001 month
+→ 分析 TMF260001_v2.json (最新版本)
 
-review MXFA01
-→ 分析 MXFA01_v2.json (最新版本)
+review TMF260001
+→ 分析 TMF260001_v2.json (最新版本)
 ```
 
 #### 目標達成判斷
@@ -938,10 +938,10 @@ Strategy Execution
 auto_review:
   enabled: true
   schedules:
-    - strategy_id: "MXFA01"
+    - strategy_id: "TMF260001"
       period: 5
       unit: "day"      # 每 5 天觸發一次
-    - strategy_id: "TXF001"
+    - strategy_id: "TXF260001"
       period: 2
       unit: "week"    # 每 2 週觸發一次
 ```
@@ -952,7 +952,7 @@ auto_review:
 |------|------|
 | `enabled` | 是否啟用自動 review |
 | `schedules` | 排程列表 |
-| `strategy_id` | 策略 ID (如 MXFA01) |
+| `strategy_id` | 策略 ID (如 TMF260001) |
 | `period` | 週期數字 |
 | `unit` | 單位 (day/week/month/quarter/year) |
 
@@ -999,10 +999,10 @@ auto_review:
 ```json
 {
   "last_review_times": {
-    "MXFA01": "2026-02-18T10:30:00"
+    "TMF260001": "2026-02-18T10:30:00"
   },
   "last_trigger_date": {
-    "MXFA01": "2026-02-18"
+    "TMF260001": "2026-02-18"
   }
 }
 ```

@@ -7,7 +7,7 @@ This is an AI-powered futures trading system using Shioaji API (Taiwan Futures E
 ## Project Structure
 
 ```
-ai_futures_trading/
+AISOTS/
 ├── main.py                 # Entry point
 ├── config.yaml            # Configuration
 ├── requirements.txt       # Dependencies
@@ -33,7 +33,7 @@ ai_futures_trading/
 ### Installation
 
 ```bash
-cd ai_futures_trading
+cd AISOTS
 pip install -r requirements.txt
 pip install pytest pytest-asyncio
 ```
@@ -297,18 +297,18 @@ The system uses per-strategy JSON files for persistence in `workspace/`:
 ```
 workspace/
 ├── strategies/           # Strategies with versioning
-│   ├── MXFA01_v1.json    # New ID format: symbol + 3 random chars
-│   ├── MXFA01_v2.json
+│   ├── TMF260001_v1.json    # New ID format: symbol + YY + 4 digits
+│   ├── TMF260001_v2.json
 │   └── ...
 ├── positions/           # Positions per strategy
-│   ├── MXFA01_positions.json
+│   ├── TMF260001_positions.json
 │   └── ...
 ├── orders/             # Orders per strategy
-│   ├── MXFA01_orders.json
+│   ├── TMF260001_orders.json
 │   └── ...
 ├── signals/            # Signals with versioning
-│   ├── MXFA01_v1.json
-│   ├── MXFA01_v2.json
+│   ├── TMF260001_v1.json
+│   ├── TMF260001_v2.json
 │   └── ...
 └── performance.json
 ```
@@ -317,7 +317,7 @@ workspace/
 
 The system uses **auto-generated strategy IDs**:
 
-- **Format**: `{FuturesCode}{3 random chars}` (e.g., `MXFA01`, `TXFZZZ`, `EFF12X`)
+- **Format**: `{symbol}{YY}{4 digits}` (e.g., `TMF260001`, `TXF260001`, `EFF260001`)
 - **Generation**: Automatically generated when creating a strategy via `create_strategy` or `confirm_create_strategy`
 - **Symbol exclusivity**: Only ONE enabled strategy per futures code at a time
 - **Auto-disable**: When enabling a new strategy version, old versions with the same symbol are automatically disabled
@@ -325,26 +325,46 @@ The system uses **auto-generated strategy IDs**:
 Example flow:
 1. User: "幫我設計一個每日賺500元的策略"
 2. System asks for futures code (if not provided)
-3. User confirms → Strategy created with auto-generated ID like `MXFA01`
-4. User enables → Old MXF strategies auto-disabled → System auto-starts → Strategy code generated
+ 3. User confirms → Strategy created with auto-generated ID like `TMF260001`
+4. System automatically runs two-stage verification
+5. User enables → Old MXF strategies auto-disabled → System auto-starts
+
+#### Strategy Verification
+
+When a strategy is created, the system automatically performs **two-stage verification**:
+
+1. **Stage 1: LLM Self-Review** (max 3 attempts)
+   - Compares generated code with prompt description
+   - Checks if logic correctly implements the strategy
+   - If fails: LLM attempts to fix the code
+
+2. **Stage 2: Historical Backtest**
+   - Uses last 100 K-bars to test the strategy
+   - Checks signal distribution (e.g., not all hold, not over-trading)
+   - If fails: returns to Stage 1
+
+3. **On 3 failures**: Notifies user with error details, user must recreate strategy
+
+Only strategies that pass verification can be enabled by users.
 
 #### Strategy States
 
-The system uses two state properties:
+The system uses **three** state properties:
 
 | State | Property | Description |
 |-------|----------|-------------|
+| Verified | `verified` | Whether strategy passed two-stage verification |
 | Enabled | `enabled` | User-level switch (on/off) |
 | Running | `is_running` | System execution state |
 
+- **`verified`**: Set to `True` when strategy passes verification (LLM review + backtest)
 - **`enabled`**: Set to `True` when user enables the strategy via `enable <ID>`
-- **`is_running`**: Set to `True` when the system actually starts executing the strategy (generates code, subscribes to market data, begins trading)
+- **`is_running`**: Set to `True` when the system actually starts executing the strategy
 
-When a strategy is enabled but not yet running, the main loop (`run_all_strategies()`) will automatically call `start_strategy()` to:
+When a strategy is enabled, the main loop (`run_all_strategies()`) will automatically call `start_strategy()` to:
 1. Set `is_running = True`
-2. Generate strategy code via LLM
-3. Subscribe to market quotes
-4. Begin executing trades
+2. Subscribe to market quotes
+3. Begin executing trades
 
 #### Versioning
 
@@ -384,7 +404,7 @@ recorder = SignalRecorder(Path("workspace"))
 
 # Record a signal (include strategy version)
 signal_id = recorder.record_signal(
-    strategy_id="MXFA01",
+    strategy_id="TMF260001",
     strategy_version=2,
     signal="buy",
     price=18500,
@@ -394,7 +414,7 @@ signal_id = recorder.record_signal(
 # Update result when position is closed
 recorder.update_result(
     signal_id=signal_id,
-    strategy_id="MXFA01",
+    strategy_id="TMF260001",
     strategy_version=2,
     status="filled",
     exit_price=18600,
@@ -403,14 +423,14 @@ recorder.update_result(
 )
 
 # Get signals for latest version
-signals = recorder.get_signals("MXFA01")
+signals = recorder.get_signals("TMF260001")
 
 # Get signals for specific version
-signals = recorder.get_signals("MXFA01", version=2)
+signals = recorder.get_signals("TMF260001", version=2)
 
 # Archive to new version when strategy is updated
 recorder.archive_to_new_version(
-    strategy_id="MXFA01",
+    strategy_id="TMF260001",
     old_version=1,
     new_version=2
 )
@@ -426,7 +446,7 @@ from src.analysis.performance_analyzer import PerformanceAnalyzer
 analyzer = PerformanceAnalyzer(recorder)
 
 # Get performance report
-report = analyzer.format_performance_report("MXFA01", "month")
+report = analyzer.format_performance_report("TMF260001", "month")
 
 # Check if goal is achieved
 achieved = analyzer.check_goal_achieved(
@@ -447,7 +467,7 @@ from src.analysis.strategy_reviewer import StrategyReviewer
 reviewer = StrategyReviewer(llm_provider, analyzer)
 
 # Get LLM review
-review = reviewer.review("MXFA01", strategy_info)
+review = reviewer.review("TMF260001", strategy_info)
 ```
 
 ### Strategy Optimization
@@ -456,10 +476,10 @@ Use `TradingTools` for self-optimizing strategies:
 
 ```python
 # Set a goal for the strategy
-tools.set_strategy_goal("MXFA01", goal=500, goal_unit="daily")
+tools.set_strategy_goal("TMF260001", goal=500, goal_unit="daily")
 
 # Run optimization - checks goal achievement and triggers LLM review if needed
-result = tools.optimize_strategy("MXFA01")
+result = tools.optimize_strategy("TMF260001")
 
 # Confirm optimization changes
 result = tools.confirm_optimize(confirmed=True)
@@ -499,10 +519,10 @@ Configuration in `config.yaml`:
 auto_review:
   enabled: true
   schedules:
-    - strategy_id: "MXFA01"
+    - strategy_id: "TMF260001"
       period: 5
       unit: "day"      # Trigger every 5 days
-    - strategy_id: "TXF001"
+    - strategy_id: "TXF260001"
       period: 2
       unit: "week"     # Trigger every 2 weeks
 ```
@@ -557,8 +577,8 @@ def test_function_name():
 ### Strategy Prompt Storage
 
 - When a strategy's prompt is modified, the system automatically regenerates the strategy code
-- Generated code is stored in per-strategy JSON files (e.g., `workspace/strategies/MXFA01_v1.json`) along with version info
-- Strategy ID is auto-generated (format: `{symbol}{3 random chars}`)
+- Generated code is stored in per-strategy JSON files (e.g., `workspace/strategies/TMF260001_v1.json`) along with version info
+- Strategy ID is auto-generated (format: `{symbol}{YY}{4 digits}`)
 
 ### Technical Indicators
 
@@ -614,10 +634,10 @@ The system supports two ways to create strategies:
 # 2. LLM asks for symbol if not provided (TXF, MXF, EFF, etc.)
 # 3. LLM infers parameters and shows for confirmation
 # 4. User can modify parameters (e.g., "停損改成50點")
-# 5. User confirms → strategy created with auto-generated ID (e.g., MXFA01)
+# 5. User confirms → strategy created with auto-generated ID (e.g., TMF260001)
 ```
 
-**Strategy ID is auto-generated**: `{symbol}{3 random chars}` (e.g., `MXFA01`, `TXFZZZ`)
+**Strategy ID is auto-generated**: `{symbol}{YY}{4 digits}` (e.g., `TMF260001`, `TXF260001`)
 
 ### Self-Optimizing System
 

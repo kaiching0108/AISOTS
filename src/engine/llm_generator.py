@@ -300,3 +300,230 @@ class LLMGenerator:
     def clear_cache(self) -> None:
         """清除快取"""
         self._cache.clear()
+    
+    async def review_code(self, prompt: str, code: str) -> dict:
+        """Stage 1: LLM 自我審查
+        
+        Args:
+            prompt: 用戶策略描述
+            code: LLM 生成的程式碼
+            
+        Returns:
+            dict: {'passed': bool, 'reason': str, 'suggestion': str}
+        """
+        review_prompt = f"""你是一個程式碼審查員。請審查以下策略程式碼是否符合用戶的策略描述。
+
+## 用戶策略描述
+{prompt}
+
+## LLM 生成的程式碼
+```python
+{code}
+```
+
+## 審查要點
+1. 程式碼邏輯是否正確實現了策略描述？
+2. 訊號判斷條件是否正確？（buy/sell/close/hold）
+3. 是否有明顯的邏輯錯誤或 bug？
+
+## 輸出格式
+請用以下格式回覆：
+審查結果：通過/不通過
+原因：<具體說明>
+修正建議：<如果不通過，給出修正建議>"""
+        
+        try:
+            response = await self.provider.generate(review_prompt)
+            response_text = response.get("text", "") if isinstance(response, dict) else str(response)
+            
+            passed = "通過" in response_text and "不通過" not in response_text
+            
+            reason = ""
+            suggestion = ""
+            
+            if "原因：" in response_text:
+                parts = response_text.split("原因：")
+                if len(parts) > 1:
+                    reason_part = parts[1].split("修正建議：")
+                    reason = reason_part[0].strip()
+                    if len(reason_part) > 1:
+                        suggestion = reason_part[1].strip()
+            
+            return {
+                "passed": passed,
+                "reason": reason,
+                "suggestion": suggestion,
+                "full_response": response_text
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in review_code: {e}")
+            return {
+                "passed": False,
+                "reason": f"審查過程發生錯誤: {str(e)}",
+                "suggestion": ""
+            }
+    
+    async def backtest_strategy(self, strategy_class, symbol: str, timeframe: str = "15m", count: int = 100) -> dict:
+        """Stage 2: 歷史 K 棒回測
+        
+        Args:
+            strategy_class: 策略類別
+            symbol: 期貨代碼
+            timeframe: K 線週期
+            count: K 棒數量
+            
+        Returns:
+            dict: {'passed': bool, 'reason': str, 'signal_counts': dict}
+        """
+        try:
+            from src.engine.framework import BarData
+            from datetime import datetime
+            
+            from src.api.shioaji_client import ShioajiClient
+            client = ShioajiClient(
+                api_key="",
+                secret_key="",
+                simulation=True
+            )
+            
+            contract = client.get_contract(symbol)
+            if not contract:
+                return {"passed": False, "reason": f"找不到合約: {symbol}"}
+            
+            bars_data = client.get_kbars(contract, timeframe, count)
+            if not bars_data or not bars_data.get("ts"):
+                return {"passed": False, "reason": f"無法取得 K 棒資料"}
+            
+            strategy = strategy_class(symbol)
+            signals = []
+            
+            for i in range(len(bars_data["ts"])):
+                bar = BarData(
+                    timestamp=datetime.fromtimestamp(bars_data["ts"][i]),
+                    symbol=symbol,
+                    open=float(bars_data["open"][i]),
+                    high=float(bars_data["high"][i]),
+                    low=float(bars_data["low"][i]),
+                    close=float(bars_data["close"][i]),
+                    volume=float(bars_data["volume"][i])
+                )
+                
+                try:
+                    signal = strategy.on_bar(bar)
+                    if signal in ['buy', 'sell', 'close', 'hold']:
+                        signals.append(signal)
+                    else:
+                        signals.append('hold')
+                except Exception as e:
+                    return {"passed": False, "reason": f"策略執行錯誤: {str(e)}"}
+            
+            from collections import Counter
+            signal_counts = Counter(signals)
+            total = len(signals)
+            
+            trade_signals = signal_counts.get('buy', 0) + signal_counts.get('sell', 0) + signal_counts.get('close', 0)
+            trade_ratio = trade_signals / total if total > 0 else 0
+            
+            if trade_signals == 0:
+                return {
+                    "passed": False,
+                    "reason": "策略從未產生交易訊號（全是 hold），可能邏輯有誤",
+                    "signal_counts": dict(signal_counts)
+                }
+            
+            if trade_ratio > 0.5:
+                return {
+                    "passed": False,
+                    "reason": f"交易訊號過於頻繁（{trade_ratio*100:.1f}%），可能有問題",
+                    "signal_counts": dict(signal_counts)
+                }
+            
+            buy_count = signal_counts.get('buy', 0)
+            sell_count = signal_counts.get('sell', 0)
+            if buy_count > 0 and sell_count == 0:
+                return {
+                    "passed": False,
+                    "reason": "訊號比例失衡（只有 buy 沒有 sell）",
+                    "signal_counts": dict(signal_counts)
+                }
+            if sell_count > 0 and buy_count == 0:
+                return {
+                    "passed": False,
+                    "reason": "訊號比例失衡（只有 sell 沒有 buy）",
+                    "signal_counts": dict(signal_counts)
+                }
+            
+            return {
+                "passed": True,
+                "reason": "驗證通過",
+                "signal_counts": dict(signal_counts)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in backtest_strategy: {e}")
+            return {"passed": False, "reason": f"回測過程發生錯誤: {str(e)}"}
+    
+    async def verify_strategy(self, prompt: str, code: str, symbol: str, timeframe: str = "15m", max_attempts: int = 3) -> dict:
+        """兩階段策略驗證流程
+        
+        Args:
+            prompt: 用戶策略描述
+            code: LLM 生成的程式碼
+            symbol: 期貨代碼
+            timeframe: K 線週期
+            max_attempts: 最大驗證次數
+            
+        Returns:
+            dict: {'passed': bool, 'error': str, 'attempts': int}
+        """
+        class_name = self.extract_class_name(code)
+        if class_name is None:
+            return {"passed": False, "error": "無法解析類別名稱", "attempts": 0}
+        
+        strategy_class = self.compile_strategy(code, class_name)
+        if strategy_class is None:
+            return {"passed": False, "error": "程式碼編譯失敗", "attempts": 0}
+        
+        for attempt in range(1, max_attempts + 1):
+            logger.info(f"Verification attempt {attempt}/{max_attempts}")
+            
+            review_result = await self.review_code(prompt, code)
+            
+            if not review_result["passed"]:
+                logger.warning(f"Stage 1 failed: {review_result['reason']}")
+                if attempt < max_attempts and review_result.get("suggestion"):
+                    logger.info(f"Applying suggestion: {review_result['suggestion']}")
+                    code = review_result["suggestion"]
+                    strategy_class = self.compile_strategy(code, class_name)
+                    if strategy_class is None:
+                        continue
+                else:
+                    return {
+                        "passed": False,
+                        "error": f"Stage 1 失敗: {review_result['reason']}",
+                        "attempts": attempt
+                    }
+            
+            backtest_result = await self.backtest_strategy(strategy_class, symbol, timeframe)
+            
+            if not backtest_result["passed"]:
+                logger.warning(f"Stage 2 failed: {backtest_result['reason']}")
+                return {
+                    "passed": False,
+                    "error": f"Stage 2 失敗: {backtest_result['reason']}",
+                    "attempts": attempt
+                }
+            
+            logger.info(f"Verification passed on attempt {attempt}")
+            return {
+                "passed": True,
+                "error": None,
+                "attempts": attempt
+            }
+        
+        return {
+            "passed": False,
+            "error": f"驗證失敗，已嘗試 {max_attempts} 次",
+            "attempts": max_attempts
+        }

@@ -321,7 +321,30 @@ class MyStrategy(TradingStrategy):
         return 'hold'  # 或 'buy', 'sell', 'close'
 ```
 
-### 4.2 可用屬性
+### 4.2 BarData（K棒資料）
+
+| 屬性 | 說明 |
+|------|------|
+| `bar.timestamp` | 時間戳 |
+| `bar.open` | 開盤價 |
+| `bar.high` | 最高價 |
+| `bar.low` | 最低價 |
+| `bar.close` | 收盤價 |
+| `bar.volume` | 成交量 |
+| `bar.pct_change` | 漲跌幅（小數，如 0.05 代表 5%） |
+| `bar.get_change_from(price)` | 相對於某價格的漲跌幅 |
+
+### 4.3 FillData（成交回報）
+
+| 屬性 | 說明 |
+|------|------|
+| `fill.symbol` | 合約代碼 |
+| `fill.side` | 買賣方向 ('buy' 或 'sell') |
+| `fill.price` | 成交價格 |
+| `fill.quantity` | 成交數量 |
+| `fill.timestamp` | 成交時間 |
+
+### 4.4 可用屬性
 
 | 屬性 | 說明 |
 |------|------|
@@ -330,13 +353,14 @@ class MyStrategy(TradingStrategy):
 | `self.context` | 字典，可儲存自定義狀態 |
 | `self.symbol` | 合約代碼 |
 
-### 4.3 可用方法
+### 4.5 可用方法
 
 | 方法 | 說明 |
 |------|------|
 | `self.get_bars(n)` | 取得最近 n 根 K 棒 |
 | `self.get_dataframe(n)` | 取得 pandas DataFrame |
 | `self.ta(指標, **參數)` | 使用 pandas_ta 計算技術指標 |
+| `self.on_fill(fill)` | 成交回調（可選實作） |
 
 > **注意**：當 K 棒數據不足（少於 2 根）時，`ta()` 回傳 `None`。策略應檢查返回值是否為 `None` 再使用。
 > 
@@ -347,7 +371,7 @@ class MyStrategy(TradingStrategy):
 > rsi_value = rsi.iloc[-1]
 > ```
 
-### 4.4 pandas_ta 支援的指標
+### 4.6 pandas_ta 支援的指標
 
 | 指標 | 說明 | 參數 |
 |------|------|------|
@@ -364,48 +388,305 @@ class MyStrategy(TradingStrategy):
 | VWAP | 成交量加權平均價 | - |
 | WILLR | 威廉指標 | period=14 |
 
+### 4.7 on_bar 回傳值
+
+| 回傳值 | 動作 |
+|--------|------|
+| `'buy'` | 買進開多 |
+| `'sell'` | 賣出開空 |
+| `'close'` | 平倉 |
+| `'hold'` | 無動作 |
+
+### 4.8 策略程式碼範例
+
+```python
+from src.engine.framework import TradingStrategy, BarData
+
+class RSIStrategy(TradingStrategy):
+    def __init__(self, symbol: str):
+        super().__init__(symbol)
+    
+    def on_bar(self, bar: BarData) -> str:
+        rsi = self.ta('RSI', period=14)
+        if rsi is None:
+            return 'hold'
+        
+        rsi_value = rsi.iloc[-1]
+        
+        if rsi_value < 30 and self.position == 0:
+            return 'buy'
+        elif rsi_value > 70 and self.position > 0:
+            return 'sell'
+        elif self.position > 0:
+            # 有部位時檢查是否該停損/止盈
+            pnl_pct = (bar.close - self.entry_price) / self.entry_price
+            if pnl_pct < -0.02:  # 停損 2%
+                return 'close'
+        
+        return 'hold'
+```
+
+### 4.9 策略執行流程
+
+LLM 生成策略程式碼後，盯盤執行由以下元件負責：
+
+| 元件 | 檔案 | 職責 |
+|------|------|------|
+| `StrategyRunner` | `runner.py` | 策略執行協調器 |
+| `StrategyExecutor` | `framework.py` | 實際執行策略訊號 |
+
+#### 執行流程
+
+```
+LLM 生成策略程式碼
+       ↓
+StrategyRunner.start_strategy()  ← 啟動策略
+       ↓
+StrategyRunner._create_executor()  ← 建立 StrategyExecutor
+       ↓
+StrategyRunner.run_all_strategies()  ← 每 60 秒執行
+       ↓
+StrategyRunner.execute_strategy()
+       ↓
+StrategyRunner.execute_strategy_llm()
+       ↓
+StrategyExecutor.execute_bar(bar)  ← 將 K 棒傳入策略
+       ↓
+TradingStrategy.on_bar(bar)  ← 策略邏輯產生訊號
+       ↓
+回傳 'buy'/'sell'/'close'/'hold'
+```
+
+#### 關鍵程式碼位置
+
+| 功能 | 行號 |
+|------|------|
+| 執行所有策略循環 | `runner.py:428` (`run_all_strategies`) |
+| 建立執行器 | `runner.py:285` (`_create_executor`) |
+| 執行策略訊號 | `runner.py:313` (`execute_strategy_llm`) |
+| 執行 K 棒 | `framework.py:216` (`execute_bar`) |
+
+#### 執行週期
+
+- `run_all_strategies()` 每 **60 秒**（可配置）執行一次
+- 檢查所有 `enabled` 且 `is_running` 的策略
+- 將最新 K 棒傳入 `StrategyExecutor.execute_bar()`
+- 策略產生訊號後，透過 `on_signal` callback 處理下單
+
+### 4.10 K Bar 資料取得
+
+#### 資料來源
+
+| 來源 | 檔案/方法 | 說明 |
+|------|----------|------|
+| 歷史 K 線 | `shioaji_client.py:get_kbars()` | 呼叫 Shioaji API 取得歷史 K 棒 |
+| 實時報價 | `shioaji_client.py:subscribe_quote()` | 訂閱合約即時報價 |
+
+#### 取得流程
+
+```
+1. 策略啟動時
+   │
+   ▼
+Runner.ensure_sufficient_data()
+   │
+   ▼
+MarketDataService.fetch_historical(symbol, timeframe, count)
+   │
+   ▼
+ShioajiClient.get_kbars(contract, timeframe, count)
+   │
+   ▼
+api.kbars(contract)  ← Shioaji API 取得真實 K 線
+   │
+   ▼
+回傳 K 棒列表 [{timestamp, open, high, low, close, volume}, ...]
+```
+
+#### 關鍵程式碼位置
+
+| 功能 | 位置 |
+|------|------|
+| 取得 K 線 | `shioaji_client.py:152` (`get_kbars`) |
+| Shioaji API 呼叫 | `shioaji_client.py:158` |
+| 歷史資料取得 | `data_service.py:131` (`fetch_historical`) |
+| 報價訂閱 | `data_service.py:22` (`subscribe`) |
+| 價格快取 | `price_cache.py:44` (`PriceCache`) |
+
+#### 模擬 vs 非模擬
+
+| 模式 | 資料來源 |
+|------|----------|
+| 模擬 (`simulation: true`) | `_generate_mock_kbars()` 產生模擬資料 |
+| 非模擬 | `api.kbars(contract)` 取得真實市場資料 |
+
 ---
+#### 實時報價處理
+1. 透過 subscribe_quote() 訂閱合約報價
+2. 報價資料存入 PriceCache
+3. StrategyRunner 定時取得最新報價轉換為 K 棒
+4. 傳入 StrategyExecutor.execute_bar() 執行策略
 
-## 5. 資料儲存
+#### Timeframe 處理
 
-### 5.1 儲存位置
+- 策略啟動時從 `strategy.params.timeframe` 讀取週期參數
+- `get_kbars(contract, timeframe, count)` 取得該週期 K 棒
+- 由於設計上每個 symbol 同時只有一個策略，採用 `market_data_cache[symbol]` 儲存，不會有衝突
 
-所有資料儲存於 `workspace/` 目錄：
+### 4.11 MarketData 快取架構
+
+#### 兩套快取系統
 
 ```
-workspace/
-├── strategies.json      # 3個策略配置 (含 LLM 生成的程式碼)
-├── positions.json      # 部位記錄 (按策略分開)
-├── orders.json         # 訂單記錄
-├── performance.json    # 績效統計
-└── logs/
-    └── trading.log    # 交易日誌
+┌─────────────────────────────────────────────────────────────────┐
+│                        Shioaji API                              │
+│                  (真實市場報價 / 歷史K棒)                        │
+└──────────────────────────┬──────────────────────────────────────┘
+                           │
+                           ▼
+┌──────────────────────────┐    ┌───────────────────────────────┐
+│   MarketDataService     │    │      StrategyRunner            │
+│   (price_cache)         │    │   (market_data_cache)          │
+│   - 最新價格快取        │    │   - K棒歷史資料               │
+└──────────────────────────┘    └───────────────────────────────┘
 ```
 
-### 5.2 策略配置 (strategies.json)
+| 快取 | 位置 | 用途 | 資料來源 |
+|------|------|------|----------|
+| `price_cache` | `data_service.py` | 價格快取 | 即時報價 |
+| `market_data_cache` | `runner.py` | K棒快取 | 歷史K棒 + 即時報價 |
 
-```json
-{
-  "strategies": [
-    {
-      "id": "MXFA01",
-      "name": "RSI策略",
-      "symbol": "MXF",
-      "prompt": "當RSI低於30買進，高於70賣出",
-      "enabled": true,
-      "params": {
-        "timeframe": "15m",
-        "stop_loss": 50,
-        "take_profit": 100,
-        "position_size": 2
-      },
-      "strategy_code": "class RSIStrategy(TradingStrategy)...",
-      "strategy_class_name": "RSIStrategy",
-      "strategy_generated_at": "2024-01-15T10:00:00",
-      "strategy_version": 1
-    }
-  ]
-}
+#### MarketData 資料結構
+
+```python
+class MarketData:
+    symbol: str                           # 期貨代碼
+    timestamps: List[datetime]            # 時間序列
+    open_prices: List[float]              # 開盤價
+    high_prices: List[float]              # 最高價
+    low_prices: List[float]               # 最低價
+    close_prices: List[float]             # 收盤價
+    volumes: List[float]                  # 成交量
+    current_price: float                  # 最新價格
+```
+
+#### 快取運作流程
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ 1. 策略啟動時 (start_strategy)                              │
+│    ensure_sufficient_data()                                │
+│    → get_kbars() 取得歷史K棒                               │
+│    → update_market_data() 存入快取                        │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│ 2. 即時報價 (subscribe_quote)                              │
+│    → 價格更新觸發 update_market_data()                     │
+│    → 新tick寫入快取，維持最多500根K棒                      │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│ 3. 每60秒執行 (run_all_strategies)                        │
+│    execute_strategy_llm()                                  │
+│    → 從 market_data_cache[symbol] 取最新K棒              │
+│    → 傳入 StrategyExecutor.execute_bar()                 │
+└─────────────────────────────────────────────────────────────┘
+```
+
+#### 關鍵方法
+
+| 方法 | 行號 | 功能 |
+|------|------|------|
+| `update_market_data()` | `runner.py:393` | 更新 K 棒到快取 |
+| `ensure_sufficient_data()` | `runner.py:55` | 確保有足夠歷史資料 |
+| `get_market_data()` | `runner.py:424` | 取得某 symbol 的 MarketData |
+
+#### 快取維護
+
+- 最多保留 **500 根** K 棒
+- 超過自動截斷舊資料 (`runner.py:414-422`)
+
+### 4.12 策略程式碼驗證流程
+
+#### 驗證流程概述
+
+策略建立時，系統會自動執行兩階段驗證，確保策略程式碼符合 prompt 描述且可正常執行。
+
+```
+策略建立
+     │
+     ▼
+┌──────────────────┐
+│ Stage 1:        │
+│ LLM 自我審查    │ ◄─── 最多 3 次
+└────────┬─────────┘
+         │
+    ┌────┴────┐
+    │         │
+  通過      失敗
+    │         │
+    ▼         ▼
+ Stage 2    重新修正（回到 Stage 1）
+             │
+             │ (3次後仍失敗)
+             ▼
+         通知用戶 + 修正建議
+             │
+             ▼
+        用戶重新建立策略
+```
+
+#### Stage 1: LLM 自我審查
+
+| 項目 | 內容 |
+|------|------|
+| **重試次數** | 最多 3 次 |
+| **審查內容** | 比對程式碼與原始 prompt 描述 |
+| **審查標準** | 程式碼邏輯是否正確實現策略描述、訊號判斷條件是否正確 |
+| **失敗處理** | 重新修正程式碼，回到 Stage 1 |
+| **3 次失敗** | 通知用戶 + 修正建議，用戶需重新建立策略 |
+
+#### Stage 2: 歷史 K 棒回測
+
+| 項目 | 內容 |
+|------|------|
+| **測試資料** | 最近 100 根 K 棒 |
+| **異常判斷** | 見下表 |
+
+| 異常條件 | 說明 |
+|---------|------|
+| buy + sell > 50% | 交易過於頻繁 |
+| 全是 hold | 策略從未產生訊號 |
+| buy/sell 比例失衡 | 如 100 次訊號全是 buy |
+| 執行期 exception | 策略執行出錯 |
+
+| 失敗處理 | 退回 Stage 1 重新執行 |
+
+#### 策略模型新增欄位
+
+| 欄位 | 類型 | 說明 |
+|------|------|------|
+| `verified` | bool | 是否已通過驗證 |
+| `verification_status` | str | 驗證狀態：'pending', 'passed', 'failed' |
+| `verification_error` | str | 驗證失敗原因 |
+| `verification_attempts` | int | 驗證嘗試次數 |
+| `verified_at` | datetime | 驗證通過時間 |
+
+#### Enable 策略邏輯
+
+```
+enable_strategy()
+     │
+     ├── 檢查策略是否存在
+     │
+     ├── 檢查是否已通過驗證
+     │     ├── 已驗證 → 允許 enable
+     │     └── 未驗證/失敗 → 拒絕 enable，顯示原因
+     │
+     └── enable 策略
 ```
 
 ---

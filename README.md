@@ -6,6 +6,7 @@
 
 - 🤖 **AI 策略生成** - 用自然語言描述策略，LLM 自動生成程式碼
 - 🎯 **目標驅動策略** - 只需給出目標（如「每日賺500元」），LLM 自動推斷參數並確認後建立
+- 🔒 **策略驗證** - 建立策略時自動執行兩階段驗證（LLM審查 + 歷史K棒回測）
 - 📈 **自我優化系統** - 設定目標 → LLM 設計策略 → 執行 → 績效分析 → LLM 審查優化 → 達成目標
 - 🔔 **Telegram Bot** - 接收命令互動，下單、成交、風控警告即時通知
 - 📊 **多種 LLM 支援** - Ollama, OpenAI, Anthropic, DeepSeek, OpenRouter
@@ -16,7 +17,7 @@
 
 ```bash
 git clone https://github.com/kaiching0108/AISOTS.git
-cd ai_futures_trading
+cd AISOTS
 pip install -r requirements.txt
 ```
 
@@ -183,7 +184,7 @@ auto_review:
 ## 專案結構
 
 ```
-ai_futures_trading/
+AISOTS/
 ├── main.py                 # 入口程式
 ├── config.yaml            # 配置文件
 ├── requirements.txt       # Python 依賴
@@ -271,6 +272,7 @@ ai_futures_trading/
 | 3.0.0 | 新增自我優化系統 - 第一階段 |
 | 3.1.0 | 新增自我優化系統 - 第二階段 |
 | 3.2.0 | 新增自我優化系統 - 第三階段 |
+| 3.3.0 | 新增策略程式碼兩階段驗證（LLM審查+歷史K棒回測）|
 
 ## License
 

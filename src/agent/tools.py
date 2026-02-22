@@ -1,4 +1,5 @@
 """AI Agent 交易工具 - 對應 Nanobot Tool 概念"""
+import asyncio
 import random
 from typing import Any, Dict, Optional
 from datetime import datetime
@@ -203,6 +204,26 @@ K線週期: {strategy.params.get('timeframe', 'N/A')}
             logger.error(f"Strategy not found: {strategy_id}")
             return f"❌ 找不到策略: {strategy_id}"
         
+        # 檢查策略是否已通過驗證
+        if not strategy.verified:
+            if strategy.verification_status == "failed":
+                return f"""❌ 無法啟用策略：驗證失敗
+────────────────
+ID: {strategy_id}
+名稱: {strategy.name}
+驗證狀態：失敗
+原因：{strategy.verification_error}
+
+請重新建立策略或修改策略描述"""
+            else:
+                return f"""❌ 無法啟用策略：尚未通過驗證
+────────────────
+ID: {strategy_id}
+名稱: {strategy.name}
+驗證狀態：{strategy.verification_status}
+
+請稍後再試或重新建立策略"""
+        
         logger.info(f"Found strategy: {strategy.name}, current enabled: {strategy.enabled}")
         
         # 檢查同一 symbol 是否有其他版本已 enable
@@ -324,21 +345,19 @@ K線週期: {strategy.params.get('timeframe', 'N/A')}
         return f"✅ 策略已強制平倉並停用: {strategy_id}"
     
     def _generate_strategy_id(self, symbol: str) -> str:
-        """自動生成策略 ID：symbol + 3位隨機字符（數字或大寫字母）"""
-        import random
-        import string
+        """自動生成策略 ID：symbol + 年份後2碼 + 4位數字"""
+        from datetime import datetime
         
         symbol = symbol.upper().strip()
-        chars = string.ascii_uppercase + string.digits  # A-Z, 0-9
+        year = str(datetime.now().year)[-2:]
         
-        max_attempts = 100
-        for _ in range(max_attempts):
-            suffix = ''.join(random.choices(chars, k=3))
-            new_id = f"{symbol}{suffix}"
+        for num in range(10000):
+            new_id = f"{symbol}{year}{num:04d}"
             if not self.strategy_mgr.get_strategy(new_id):
                 return new_id
         
-        return f"{symbol}{''.join(random.choices(chars, k=3))}"
+        import random
+        return f"{symbol}{year}{random.randint(0, 9999):04d}"
     
     def create_strategy(
         self,
@@ -780,6 +799,10 @@ K線週期: {params['timeframe']}
         
         self.strategy_mgr.add_strategy(strategy)
         
+        verify_result = asyncio.run(self._verify_strategy_at_creation(strategy))
+        
+        self.strategy_mgr.store.save_strategy(strategy.to_dict())
+        
         goal_text = ""
         if params.get("goal"):
             unit_names = {
@@ -806,6 +829,11 @@ K線週期: {params['timeframe']}
         else:
             display_prompt = clean_prompt
         
+        if verify_result["passed"]:
+            verification_text = f"✅ 驗證狀態：通過"
+        else:
+            verification_text = f"❌ 驗證狀態：失敗\n原因：{verify_result.get('error', '未知錯誤')}"
+        
         result = f"""✅ 策略已建立（停用中）
 {'='*30}
 
@@ -824,6 +852,9 @@ K線週期: {params['timeframe']}
 {display_prompt}
 
 {'='*30}
+{verification_text}
+
+{'='*30}
 ⚠️ 策略已建立但尚未啟用！
 請說「啟用 {strategy_id}」開始交易"""
         
@@ -836,6 +867,65 @@ K線週期: {params['timeframe']}
         self._awaiting_symbol = False
         self._awaiting_confirm = False
         self._current_goal = None
+    
+    async def _verify_strategy_at_creation(self, strategy) -> dict:
+        """策略建立時自動驗證
+        
+        Args:
+            strategy: 策略物件
+            
+        Returns:
+            dict: {'passed': bool, 'error': str}
+        """
+        from src.engine.llm_generator import LLMGenerator
+        
+        if not self._llm_provider:
+            logger.warning("No LLM provider, skipping verification")
+            return {"passed": True, "error": None}
+        
+        try:
+            llm_generator = LLMGenerator(self._llm_provider)
+            
+            logger.info(f"Starting verification for strategy: {strategy.id}")
+            
+            code = await llm_generator.generate(strategy.prompt)
+            
+            if not code:
+                error_msg = "無法生成策略程式碼"
+                strategy.set_verification_failed(error_msg)
+                return {"passed": False, "error": error_msg}
+            
+            class_name = llm_generator.extract_class_name(code)
+            if not class_name:
+                error_msg = "無法解析類別名稱"
+                strategy.set_verification_failed(error_msg)
+                return {"passed": False, "error": error_msg}
+            
+            strategy.set_strategy_code(code, class_name)
+            
+            timeframe = strategy.params.get("timeframe", "15m")
+            verify_result = await llm_generator.verify_strategy(
+                prompt=strategy.prompt,
+                code=code,
+                symbol=strategy.symbol,
+                timeframe=timeframe,
+                max_attempts=3
+            )
+            
+            if verify_result["passed"]:
+                strategy.set_verification_passed()
+                logger.info(f"Strategy {strategy.id} verified successfully")
+                return {"passed": True, "error": None}
+            else:
+                strategy.set_verification_failed(verify_result["error"])
+                logger.warning(f"Strategy {strategy.id} verification failed: {verify_result['error']}")
+                return {"passed": False, "error": verify_result["error"]}
+                
+        except Exception as e:
+            error_msg = f"驗證過程發生錯誤: {str(e)}"
+            logger.error(f"Verification error for {strategy.id}: {e}")
+            strategy.set_verification_failed(error_msg)
+            return {"passed": False, "error": error_msg}
     
     # ========== 部位工具 ==========
     

@@ -38,6 +38,13 @@ class Strategy:
         self.strategy_generated_at: Optional[str] = None
         self.strategy_version: int = 1
         self.prompt_hash: Optional[str] = None
+        
+        # 驗證狀態
+        self.verified: bool = False
+        self.verification_status: str = "pending"  # 'pending', 'passed', 'failed'
+        self.verification_error: Optional[str] = None
+        self.verification_attempts: int = 0
+        self.verified_at: Optional[str] = None
     
     def to_dict(self) -> dict:
         """轉換為字典"""
@@ -59,7 +66,12 @@ class Strategy:
             "strategy_class_name": self.strategy_class_name,
             "strategy_generated_at": self.strategy_generated_at,
             "strategy_version": self.strategy_version,
-            "prompt_hash": self.prompt_hash
+            "prompt_hash": self.prompt_hash,
+            "verified": self.verified,
+            "verification_status": self.verification_status,
+            "verification_error": self.verification_error,
+            "verification_attempts": self.verification_attempts,
+            "verified_at": self.verified_at
         }
     
     @classmethod
@@ -87,6 +99,11 @@ class Strategy:
         strategy.strategy_generated_at = data.get("strategy_generated_at")
         strategy.strategy_version = data.get("strategy_version", 1)
         strategy.prompt_hash = data.get("prompt_hash")
+        strategy.verified = data.get("verified", False)
+        strategy.verification_status = data.get("verification_status", "pending")
+        strategy.verification_error = data.get("verification_error")
+        strategy.verification_attempts = data.get("verification_attempts", 0)
+        strategy.verified_at = data.get("verified_at")
         return strategy
     
     def get_param(self, key: str, default: Any = None) -> Any:
@@ -131,6 +148,32 @@ class Strategy:
     def has_valid_strategy_code(self) -> bool:
         """檢查是否有有效的策略程式碼"""
         return self.strategy_code is not None and self.strategy_class_name is not None
+    
+    def set_verification_passed(self) -> None:
+        """設定驗證通過"""
+        self.verified = True
+        self.verification_status = "passed"
+        self.verification_error = None
+        self.verified_at = datetime.now().isoformat()
+    
+    def set_verification_failed(self, error: str) -> None:
+        """設定驗證失敗"""
+        self.verification_attempts += 1
+        if self.verification_attempts >= 3:
+            self.verification_status = "failed"
+        else:
+            self.verification_status = "pending"
+        self.verification_error = error
+        self.verified = False
+        self.verified_at = None
+    
+    def reset_verification(self) -> None:
+        """重置驗證狀態"""
+        self.verified = False
+        self.verification_status = "pending"
+        self.verification_error = None
+        self.verification_attempts = 0
+        self.verified_at = None
     
     def __repr__(self) -> str:
         return f"Strategy(id={self.id}, name={self.name}, symbol={self.symbol}, enabled={self.enabled})"
