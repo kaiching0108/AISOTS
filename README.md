@@ -1,4 +1,4 @@
-# AI 期貨交易系統 (AI Futures Trading System)
+# AI Self-Optimizing Trading System (AISOTS)
 
 使用 Shioaji API 的 AI 驅動期貨交易系統，支援 LLM 策略生成與自我優化。
 
