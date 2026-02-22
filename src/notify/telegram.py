@@ -432,11 +432,11 @@ class TelegramBot:
             return
 
         help_text = """
-📋 *AI 期貨交易系統 - 命令列表*
+📋 AISOTS系統 - 命令列表
 
-🤖 【建立策略】（直接對 AI 說）
-• 方式一（手動輸入）:
-  例: 建立策略 ID=my_rsi, 名稱=RSI策略, 代碼=TXF, 描述=RSI低於30買入
+🤖 【建立策略】
+• 方式一（問答式）:
+  輸入: create
 • 方式二（目標驅動）:
   例: 幫我設計一個每日賺500元的策略
   例: 設計一個 RSI 策略
@@ -451,22 +451,22 @@ class TelegramBot:
 
 📊 【績效查詢】
 • performance <ID> [period]  - 查詢策略績效
-  例: performance strategy_001 month
+  例: performance TMF260001 month
   period: today/week/month/quarter/year/all
 
 🔎 【策略狀態】
 • status <ID>         - 查詢特定策略狀態
-  例: status strategy_001
+  例: status TMF260001
 
 📦 【策略管理】
 • enable <ID>        - 啟用策略
-  例: enable strategy_001
+  例: enable TMF260001
 • disable <ID>       - 停用策略
-  例: disable strategy_001
+  例: disable TMF260001
 
 🎯 【目標與優化】
 • goal <ID> <金額> <單位>  - 設定策略目標
-  例: goal strategy_001 500 daily
+  例: goal TMF260001 500 daily
   單位: daily/weekly/monthly/quarterly/yearly
 • review <ID>        - LLM 審查策略
 • optimize <ID>       - 執行完整優化流程

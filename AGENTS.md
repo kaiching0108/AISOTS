@@ -75,6 +75,55 @@ pytest -v
 pytest --cov=src --cov-report=html
 ```
 
+### Testing Strategy Commands via Fallback
+
+Since explicit English commands are handled via fallback, you can test the system by directly calling `fallback_handle_command()`:
+
+```python
+# Example: Test status command
+from main import AITradingSystem
+
+bot = AITradingSystem()
+result = bot.fallback_handle_command("status")
+print(result)
+
+# Test create flow
+result = bot.fallback_handle_command("create")
+result = bot.fallback_handle_command("RSI策略")  # Input strategy name
+```
+
+### Test Structure
+
+```
+tests/
+├── test_trading.py          # Basic unit tests
+├── test_fallback.py         # Fallback command tests
+├── test_create_flow.py      # Q&A strategy creation flow
+└── conftest.py             # Shared fixtures
+```
+
+### Test Coverage
+
+| Category | Test Items |
+|----------|------------|
+| Basic Commands | status, positions, strategies, performance, risk, orders |
+| Strategy Management | enable, disable, create |
+| Q&A Flow | create Q&A steps |
+| Error Handling | invalid commands, invalid parameters |
+
+### Running Specific Tests
+
+```bash
+# Run fallback tests
+pytest tests/test_fallback.py -v
+
+# Run create flow tests
+pytest tests/test_create_flow.py -v
+
+# Run all tests
+pytest tests/ -v
+```
+
 ### Type Checking (Optional)
 
 ```bash
