@@ -6,7 +6,7 @@
 
 - 🤖 **AI 策略生成** - 用自然語言描述策略，LLM 自動生成程式碼
 - 🎯 **目標驅動策略** - 只需給出目標（如「每日賺500元」），LLM 自動推斷參數並確認後建立
-- 🔒 **策略驗證** - 建立策略時自動執行兩階段驗證（LLM審查 + 歷史K棒回測）
+- 🔒 **策略驗證** - 建立策略時自動執行兩階段驗證（LLM審查比對程式碼是否符合策略描述 + 歷史K棒回測）
 - 📈 **自我優化系統** - 設定目標 → LLM 設計策略 → 執行 → 績效分析 → LLM 審查優化 → 達成目標
 - 🔔 **Telegram Bot** - 接收命令互動，下單、成交、風控警告即時通知
 - 📊 **多種 LLM 支援** - Ollama, OpenAI, Anthropic, DeepSeek, OpenRouter
@@ -46,19 +46,30 @@ telegram:
   bot_token: "YOUR_BOT_TOKEN"
   chat_id: "YOUR_CHAT_ID"
 
-strategies:
-  - id: "strategy_001"
-    name: "每日收益策略"
-    symbol: "TXF"
-    goal: 500              # 目標：每日賺 500 元
-    goal_unit: "daily"    # 目標單位: daily/weekly/monthly/quarterly/yearly
-    prompt: "RSI 低於 30 買入，高於 70 賣出"
-    enabled: true
-    params:
-      timeframe: "15m"
-      stop_loss: 50
-      take_profit: 100
-      position_size: 1
+# 風控配置
+risk:
+  max_daily_loss: 10000          # 單日最大虧損 (元)
+  max_position: 3               # 最大口數總和
+  max_orders_per_minute: 1       # 每分鐘最大下單數
+  enable_stop_loss: true         # 啟用停損
+  enable_take_profit: true       # 啟用止盈
+
+# 交易配置
+trading:
+  check_interval: 60             # 檢查間隔 (秒)
+  trading_hours:
+    day_start: "08:45"
+    day_end: "13:45"
+    night_start: "15:00"
+    night_end: "05:00"
+
+# 自動 LLM Review 排程
+auto_review:
+  enabled: false
+  # schedules:
+  #   - strategy_id: "TMF260001"
+  #     period: 5
+  #     unit: "day"      # 每 5 天觸發一次
 ```
 
 ## 使用方式
@@ -168,10 +179,10 @@ LLM 審查後可能給出以下建議：
 auto_review:
   enabled: true
   schedules:
-    - strategy_id: "strategy_001"
+    - strategy_id: "TMF260001"
       period: 5
       unit: "day"      # 每 5 天觸發一次
-    - strategy_id: "strategy_002"
+    - strategy_id: "TXF260001"
       period: 2
       unit: "week"     # 每 2 週觸發一次
 ```
