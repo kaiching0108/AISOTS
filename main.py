@@ -393,13 +393,13 @@ class AITradingSystem:
 • review <ID> - LLM 審查策略
 例: review strategy_001
 
-📦 【策略管理】
+ 📦 【策略管理】
 • enable <ID> - 啟用策略
 例: enable strategy_001
 • disable <ID> - 停用策略 (有部位會詢問)
 例: disable strategy_001
-• confirm disable <ID> - 確認停用並平倉
-例: confirm disable strategy_001
+• delete <ID> - 刪除策略 (有部位會詢問是否強制平倉)
+例: delete TMF260001
 
 🎯 【目標與優化】
 • goal <ID> <金額> <單位> - 設定目標
@@ -407,7 +407,6 @@ class AITradingSystem:
 例: goal strategy_001 10000 monthly (每月10000元)
 • optimize <ID> - 優化策略
 例: optimize strategy_001
-• confirm optimize - 確認優化修改
 
 ❓ 【其他】
 • help / ? - 顯示此列表
@@ -450,6 +449,16 @@ class AITradingSystem:
             strategy_id = disable_match.group(1).upper()
             self.logger.info(f"Directly disabling strategy: {strategy_id}")
             result = self.trading_tools.disable_strategy(strategy_id)
+            self._add_to_history(command, result)
+            return result
+        
+        # 直接處理 delete 命令
+        delete_match = re.match(r'^delete\s+(\w+)$', command_stripped)
+        
+        if delete_match:
+            strategy_id = delete_match.group(1).upper()
+            self.logger.info(f"Directly deleting strategy: {strategy_id}")
+            result = self.trading_tools.delete_strategy_tool(strategy_id)
             self._add_to_history(command, result)
             return result
         
@@ -559,6 +568,26 @@ class AITradingSystem:
             strategy_id = disable_match.group(1).upper()
             self.logger.info(f"Directly disabling strategy: {strategy_id}")
             result = self.trading_tools.disable_strategy(strategy_id)
+            self._add_to_history(command, result)
+            return result
+        
+        # 直接處理 delete 命令
+        delete_match = re.match(r'^delete\s+(\w+)$', command_stripped)
+        
+        if delete_match:
+            strategy_id = delete_match.group(1).upper()
+            self.logger.info(f"Directly deleting strategy: {strategy_id}")
+            result = self.trading_tools.delete_strategy_tool(strategy_id)
+            self._add_to_history(command, result)
+            return result
+        
+        # 直接處理 confirm delete 命令
+        confirm_delete_match = re.match(r'^confirm delete\s+(\w+)$', command_stripped)
+        
+        if confirm_delete_match:
+            strategy_id = confirm_delete_match.group(1).upper()
+            self.logger.info(f"Confirming delete strategy: {strategy_id}")
+            result = self.trading_tools.confirm_delete_strategy(strategy_id)
             self._add_to_history(command, result)
             return result
         
@@ -786,7 +815,20 @@ class AITradingSystem:
         elif command.startswith("回測 ") or command.startswith("backtest "):
             parts = command.split(" ", 1)
             strategy_id = parts[1].upper()
-            return self.trading_tools.backtest_strategy(strategy_id)
+            result = self.trading_tools.backtest_strategy(strategy_id)
+            
+            if isinstance(result, dict):
+                report = result.get("report", "")
+                chart_path = result.get("chart_path")
+                
+                if chart_path and self.notifier:
+                    self.notifier.send_message(report)
+                    self.notifier.send_photo(chart_path, caption="📈 回測圖表")
+                    return "📊 回測報告已發送"
+                else:
+                    return report
+            else:
+                return result
         
         elif command_lower in ["cancel", "取消"]:
             return "已取消操作"

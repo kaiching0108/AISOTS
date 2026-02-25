@@ -16,6 +16,10 @@ pandas_ta>=0.3.14
 # Backtesting
 backtesting
 
+# Chart Export
+kaleido
+matplotlib
+
 # HTTP Client
 httpx>=0.24
 

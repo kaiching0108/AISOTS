@@ -525,6 +525,7 @@ workspace/
 | 部位 | `workspace/positions/{id}_positions.json` |
 | 訂單 | `workspace/orders/{id}_orders.json` |
 | 訊號 | `workspace/signals/{id}_v*.json` |
+| 回測圖片 | `workspace/backtests/{id}_v*.png` |
 
 ---
 

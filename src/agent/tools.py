@@ -54,6 +54,8 @@ class TradingTools:
         
         self._pending_optimization: Optional[Dict[str, Any]] = None
         
+        self._pending_delete: Optional[Dict[str, Any]] = None
+        
         self._signal_recorder = None
         self._performance_analyzer = None
     
@@ -489,20 +491,97 @@ ID: {strategy_id}
     def delete_strategy_tool(self, strategy_id: str) -> str:
         """刪除策略"""
         
-        # 檢查是否有部位
-        position = self.position_mgr.get_position(strategy_id)
-        if position and position.quantity > 0:
-            return f"❌ 無法刪除：策略仍有部位 {position.symbol} {position.quantity}口，請先平倉"
-        
         # 檢查策略是否存在
         strategy = self.strategy_mgr.get_strategy(strategy_id)
         if not strategy:
             return f"❌ 找不到策略: {strategy_id}"
         
-        # 刪除策略
+        # 檢查是否有部位
+        position = self.position_mgr.get_position(strategy_id)
+        if position and position.quantity > 0:
+            # 設定 pending 狀態，等待用戶確認
+            self._pending_delete = {
+                "strategy_id": strategy_id,
+                "symbol": position.symbol,
+                "quantity": position.quantity,
+                "direction": position.direction,
+                "entry_price": position.entry_price
+            }
+            return f"⚠️ 策略仍有部位 {position.symbol} {position.quantity}口，若確定刪除將強制平倉。請輸入 `confirm delete {strategy_id}` 確認刪除，或輸入 `cancel` 取消。"
+        
+        # 無部位，直接刪除
         self.strategy_mgr.delete_strategy(strategy_id)
         
         return f"✅ 策略已刪除: {strategy_id}"
+    
+    def confirm_delete_strategy(self, strategy_id: str) -> str:
+        """確認刪除策略（含強制平倉）- 方案B：無pending時直接查詢狀態"""
+        
+        # 如果有 pending，驗證 strategy_id 匹配
+        if self._pending_delete:
+            if self._pending_delete.get("strategy_id") != strategy_id:
+                return "❌ 刪除衝突，請先完成當前待處理的刪除操作"
+            
+            # 從 pending 取得部位資訊
+            position_info = self._pending_delete
+            symbol = position_info["symbol"]
+            quantity = position_info["quantity"]
+            direction = position_info.get("direction", "Buy")
+            
+            # 清除 pending
+            self._pending_delete = None
+        else:
+            # 沒有 pending，直接查詢策略狀態（方案B）
+            strategy = self.strategy_mgr.get_strategy(strategy_id)
+            if not strategy:
+                return f"❌ 找不到策略: {strategy_id}"
+            
+            position = self.position_mgr.get_position(strategy_id)
+            if not position or position.quantity == 0:
+                # 無部位，直接刪除
+                self.strategy_mgr.delete_strategy(strategy_id)
+                return f"✅ 策略已刪除: {strategy_id}"
+            
+            symbol = position.symbol
+            quantity = position.quantity
+            direction = position.direction
+        
+        # 執行強制平倉
+        try:
+            contract = self.api.get_contract(symbol)
+            current_price = contract.last_price if contract else 0
+            
+            if current_price > 0:
+                close_action = "Sell" if direction == "Buy" else "Buy"
+                
+                self.api.place_order(
+                    symbol=symbol,
+                    action=close_action,
+                    quantity=quantity,
+                    price=0
+                )
+                
+                self.position_mgr.close_position(strategy_id, current_price)
+                
+                position = self.position_mgr.get_position(strategy_id)
+                pnl = position.pnl if position else 0
+                emoji = "🟢" if pnl >= 0 else "🔴"
+                
+                self.notifier.send_message(
+                    f"{emoji} *強制平倉*\n"
+                    f"─────────────\n"
+                    f"策略: {strategy_id}\n"
+                    f"平倉價: {current_price}\n"
+                    f"損益: {pnl:+,.0f}"
+                )
+        except Exception as e:
+            logger.error(f"強制平倉失敗: {e}")
+            return f"❌ 強制平倉失敗: {str(e)}"
+        
+        # 刪除策略
+        self.strategy_mgr.delete_strategy(strategy_id)
+        
+        return f"✅ 策略已強制平倉並刪除: {strategy_id}"
     
     def create_strategy_by_goal(self, goal: str, symbol: Optional[str] = None) -> str:
         """根據用戶目標建立策略（自動推斷參數）
@@ -1896,17 +1975,17 @@ Shioaji: {'✅ 連線' if conn_status else '❌ 斷線'}
             strategy_id: 策略 ID
             
         Returns:
-            str: 回測報告
+            dict: {"report": str, "chart_path": str or None}
         """
         strategy = self.strategy_mgr.get_strategy(strategy_id)
         if not strategy:
-            return f"❌ 找不到策略: {strategy_id}"
+            return {"report": f"❌ 找不到策略: {strategy_id}", "chart_path": None}
         
         if not strategy.verified:
-            return f"❌ 策略尚未通過驗證，無法執行回測。請先啟用策略以完成驗證。"
+            return {"report": f"❌ 策略尚未通過驗證，無法執行回測。請先啟用策略以完成驗證。", "chart_path": None}
         
         if not strategy.strategy_code or not strategy.strategy_class_name:
-            return f"❌ 策略缺少程式碼，無法執行回測"
+            return {"report": f"❌ 策略缺少程式碼，無法執行回測", "chart_path": None}
         
         try:
             from src.engine.backtest_engine import BacktestEngine
@@ -1920,19 +1999,24 @@ Shioaji: {'✅ 連線' if conn_status else '❌ 斷線'}
                 symbol=strategy.symbol,
                 timeframe=timeframe,
                 initial_capital=1_000_000,
-                commission=0.0002
+                commission=0.0002,
+                strategy_id=strategy_id,
+                strategy_version=strategy.strategy_version
             ))
             
             if result["passed"]:
-                return result["report"]
+                return {
+                    "report": result["report"],
+                    "chart_path": result.get("chart_path")
+                }
             else:
-                return f"❌ 回測失敗: {result['error']}"
+                return {"report": f"❌ 回測失敗: {result['error']}", "chart_path": None}
                 
         except ImportError as e:
-            return f"❌ 請安裝 backtrader: pip install backtrader"
+            return {"report": f"❌ 請安裝 backtesting: pip install backtesting", "chart_path": None}
         except Exception as e:
             logger.error(f"Backtest error: {e}")
-            return f"❌ 回測發生錯誤: {str(e)}"
+            return {"report": f"❌ 回測發生錯誤: {str(e)}", "chart_path": None}
     
     def get_tool_definitions(self) -> list:
         """取得工具定義 (for LLM)"""

@@ -120,9 +120,10 @@ LLM 會自動推斷參數，展示給用戶確認後建立策略。
 | orders | 訂單歷史 |
 | enable \<ID\> | 啟用策略 |
 | disable \<ID\> | 停用策略 |
+| delete \<ID\> | 刪除策略 |
 | price \<symbol\> | 查詢報價 |
 | status \<ID\> | 策略狀態 |
-| backtest \<ID\> | 執行歷史回測|
+| backtest \<ID\> | 執行歷史回測（包含圖表）|
 
 #### 績效分析命令
 | 指令 | 說明 |
@@ -140,7 +141,6 @@ LLM 會自動推斷參數，展示給用戶確認後建立策略。
 | goal \<ID\> \<金額\> \<單位\> | 設定策略目標 |
 | review \<ID\> | LLM 審查策略並給出修改建議 |
 | optimize \<ID\> | 執行完整優化流程 |
-| confirm optimize | 確認執行優化修改 |
 
 ## 自我優化系統
 

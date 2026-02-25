@@ -2,11 +2,16 @@
 
 import re
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Dict, List, Optional, Any
 import pandas as pd
 import pandas_ta as ta
+import matplotlib.pyplot as plt
 
 from loguru import logger
+
+WORKSPACE_DIR = Path("workspace")
+BACKTEST_DIR = WORKSPACE_DIR / "backtests"
 
 
 def extract_indicators_from_code(code: str) -> Dict[str, bool]:
@@ -264,7 +269,9 @@ class BacktestEngine:
         symbol: str,
         timeframe: str = "15m",
         initial_capital: float = 1_000_000,
-        commission: float = 0  # 固定手續費另行計算
+        commission: float = 0,
+        strategy_id: Optional[str] = None,
+        strategy_version: Optional[int] = None
     ) -> dict:
         """執行歷史回測
         
@@ -275,12 +282,15 @@ class BacktestEngine:
             timeframe: K線週期
             initial_capital: 初始資金
             commission: 已廢棄，請使用固定手續費
+            strategy_id: 策略ID（用於保存圖片）
+            strategy_version: 策略版本（用於保存圖片）
             
         Returns:
             dict: {
                 "passed": bool,
                 "report": str,
                 "metrics": {...},
+                "chart_path": str,
                 "error": str,
             }
         """
@@ -365,6 +375,34 @@ class BacktestEngine:
             
             stats = bt.run()
             
+            chart_path = None
+            if strategy_id and strategy_version:
+                try:
+                    BACKTEST_DIR.mkdir(parents=True, exist_ok=True)
+                    timestamp = datetime.now().strftime("%Y%m%d%H%M")
+                    filename = f"{strategy_id}_v{strategy_version}_{timestamp}.png"
+                    chart_path = BACKTEST_DIR / filename
+                    
+                    fig = bt.plot(
+                        symbol=symbol,
+                        open_browser=False,
+                        return_fig=True
+                    )
+                    
+                    fig.savefig(
+                        chart_path,
+                        dpi=100,
+                        bbox_inches='tight',
+                        facecolor='white',
+                        edgecolor='none'
+                    )
+                    plt.close(fig)
+                    
+                    logger.info(f"Chart saved to: {chart_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to generate chart: {e}")
+                    chart_path = None
+            
             total_return = stats['Return [%]'] if stats['Return [%]'] else 0
             sharpe = stats['Sharpe Ratio'] if stats['Sharpe Ratio'] else 0
             max_dd = stats['Max. Drawdown [%]'] if stats['Max. Drawdown [%]'] else 0
@@ -438,6 +476,7 @@ class BacktestEngine:
                 "passed": True,
                 "report": report,
                 "metrics": metrics,
+                "chart_path": str(chart_path) if chart_path else None,
                 "error": None,
             }
             
@@ -447,6 +486,7 @@ class BacktestEngine:
                 "passed": False,
                 "report": "",
                 "metrics": {},
+                "chart_path": None,
                 "error": "請安裝 backtesting: pip install backtesting"
             }
         except Exception as e:
@@ -455,6 +495,7 @@ class BacktestEngine:
                 "passed": False,
                 "report": "",
                 "metrics": {},
+                "chart_path": None,
                 "error": f"回測過程發生錯誤: {str(e)}"
             }
     

@@ -789,7 +789,7 @@ class BacktestStrategy(bt.Strategy):
 
 #### 4.13.7 使用時機
 
-1. **獨立指令**：用戶輸入 `回測 <ID>` 或 `backtest <ID>` 查看詳細回測報告
+1. **獨立指令**：用戶輸入 `回測 <ID>` 或 `backtest <ID>` 查看詳細回測報告（包含圖表）
 2. **啟用前顯示**：用戶輸入 `啟用 <ID>` 時，系統自動顯示歷史回測關鍵指標
 
 #### 4.13.8 關鍵類別
@@ -931,6 +931,8 @@ cerebro.addanalyzer(bt.analyzers.AnnualReturn, _name='annual_return')
 | 3.6.0 | 2026-02 | 新增 Fallback 命令處理機制，確保基本命令執行成功 |
 | 3.7.0 | 2026-02 | 新增 Markdown 清理機制與直接處理輸入優化 |
 | 3.8.0 | 2026-02 | 新增 BacktestEngine 歷史回測系統 |
+| 3.9.0 | 2026-02 | 新增回測圖表生成與 Telegram 圖片發送功能 |
+| 3.10.0 | 2026-02 | 新增 delete 指令與回測圖片清理功能 |
 
 ---
 

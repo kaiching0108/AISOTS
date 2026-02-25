@@ -8,6 +8,8 @@ from datetime import datetime
 from telegram import BotCommand, Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
+from pathlib import Path
+
 from src.logger import logger
 from telegram.request import HTTPXRequest
 
@@ -133,6 +135,48 @@ class TelegramNotifier:
                 
         except Exception as e:
             logger.error(f"Telegram 發送錯誤: {e}")
+            return False
+    
+    def send_photo(self, photo_path: str, caption: str = None) -> bool:
+        """發送圖片
+        
+        Args:
+            photo_path: 圖片檔案路徑
+            caption: 圖片說明文字（可選）
+            
+        Returns:
+            bool: 是否發送成功
+        """
+        if not self.enabled:
+            return False
+        
+        photo_file = Path(photo_path)
+        if not photo_file.exists():
+            logger.error(f"圖片檔案不存在: {photo_path}")
+            return False
+        
+        try:
+            url = f"{self.api_url}/sendPhoto"
+            
+            with open(photo_file, 'rb') as f:
+                files = {'photo': f}
+                data = {
+                    "chat_id": self.chat_id,
+                }
+                if caption:
+                    data["caption"] = clean_markdown_for_telegram(caption)
+                
+                response = requests.post(url, data=data, files=files, timeout=30)
+                result = response.json()
+                
+                if result.get("ok"):
+                    return True
+                else:
+                    logger.error(f"Telegram 發送圖片失敗: {result}")
+                    return False
+                    
+        except Exception as e:
+            logger.error(f"Telegram 發送圖片錯誤: {e}")
             return False
     
     def send_alert(self, title: str, message: str) -> bool:
@@ -463,6 +507,8 @@ class TelegramBot:
   例: enable TMF260001
 • disable <ID>       - 停用策略
   例: disable TMF260001
+• delete <ID>        - 刪除策略 (有部位會詢問是否強制平倉)
+  例: delete TMF260001
 
 🎯 【目標與優化】
 • goal <ID> <金額> <單位>  - 設定策略目標
@@ -470,7 +516,6 @@ class TelegramBot:
   單位: daily/weekly/monthly/quarterly/yearly
 • review <ID>        - LLM 審查策略
 • optimize <ID>       - 執行完整優化流程
-• confirm optimize   - 確認執行優化修改（需先執行 optimize）
 
 📈 【市場資料】
 • price <代碼>        - 查詢報價

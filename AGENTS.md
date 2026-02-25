@@ -861,8 +861,9 @@ if enable_match:
 | `new` / `新對話` | `clear_history()` | Clear conversation |
 | `help` / `幫助` | `show_help()` | Show help |
 | `enable <ID>` | `enable_strategy()` | Enable strategy |
-| `backtest <ID>` | `backtest_strategy()` | Execute historical backtest |
+| `backtest <ID>` | `backtest_strategy()` | Execute historical backtest (with chart) |
 | `disable <ID>` | `disable_strategy()` | Disable strategy |
+| `delete <ID>` | `delete_strategy_tool()` | Delete strategy |
 
 ### Design Principles
 

@@ -256,6 +256,13 @@ class StrategyStore(JSONStore):
                 f.unlink()
                 deleted = True
         
+        # 刪除回測圖片（所有版本）
+        backtest_dir = self.workspace_dir / "backtests"
+        if backtest_dir.exists():
+            for f in backtest_dir.glob(f"{strategy_id}_v*.png"):
+                f.unlink()
+                deleted = True
+        
         return deleted
 
 
