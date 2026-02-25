@@ -99,6 +99,7 @@ tests/
 ├── test_trading.py          # Basic unit tests
 ├── test_fallback.py         # Fallback command tests
 ├── test_create_flow.py      # Q&A strategy creation flow
+├── test_backtest.py         # Backtest engine tests
 └── conftest.py             # Shared fixtures
 ```
 
@@ -441,6 +442,102 @@ src/analysis/
 └── strategy_reviewer.py    # LLM-based strategy review
 ```
 
+### BacktestEngine Module
+
+The system includes a `BacktestEngine` module for historical backtesting using backtesting.py:
+
+```
+src/engine/
+├── backtest_engine.py      # backtesting.py 回測引擎
+├── framework.py            # 策略框架 (TradingStrategy)
+├── llm_generator.py        # LLM 策略生成器
+└── runner.py              # 策略執行協調器
+```
+
+#### Timeframe Configuration
+
+The backtest period is determined by the strategy's timeframe:
+
+| Timeframe | Backtest Period | K-bars (approx) | Description |
+|-----------|-----------------|-----------------|-------------|
+| `1m` | 1 week | ~2,000-2,500 | Minute frequency |
+| `5m` | 2 weeks | ~1,000 | Minute frequency |
+| `15m` | 1 month | ~600-700 | Minute frequency |
+| `30m` | 1 month | ~300-340 | Minute frequency |
+| `60m` / `1h` | 3 months | ~1,200-1,400 | Hour frequency |
+| `1d` | 1 year | ~250 | Daily frequency |
+
+#### Indicator Integration
+
+The BacktestEngine uses **pandas_ta** for indicator calculation, integrated with backtesting.py:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Data Flow                                              │
+├─────────────────────────────────────────────────────────┤
+│                                                         │
+│  Historical K-bars (Shioaji)                           │
+│       ↓                                                 │
+│  pandas DataFrame + pandas_ta (calculate indicators)    │
+│       ↓                                                 │
+│  backtesting.py Strategy uses self.I() to access       │
+│       ↓                                                 │
+│  backtesting.py Backtest executes strategy → trades    │
+│       ↓                                                 │
+│  Stats calculate performance                            │
+│                                                         │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Process:**
+1. Parse strategy code to extract indicator requirements
+2. Get historical K-bars from Shioaji → pandas DataFrame
+3. Calculate indicators using pandas_ta
+4. Create backtrader Cerebro + Strategy + Analyzers
+5. Run backtest
+6. Output performance report
+
+#### Usage
+
+```python
+from src.engine.backtest_engine import BacktestEngine
+
+# Initialize backtest engine
+engine = BacktestEngine(shioaji_client)
+
+# Run backtest
+result = await engine.run_backtest(
+    strategy_code=strategy_code,
+    class_name=class_name,
+    symbol="TXF",
+    timeframe="15m",
+    initial_capital=1_000_000,
+    commission=0.0002
+)
+
+# Output format
+# {
+#     "passed": bool,
+#     "report": str,           # Formatted report
+#     "metrics": {
+#         "total_return": float,
+#         "sharpe_ratio": float,
+#         "sqn": float,
+#         "win_rate": float,
+#         "trade_count": int,
+#         "max_drawdown": float,
+#     },
+#     "error": str,
+# }
+```
+
+#### Order Types
+
+| Environment | Order Type | Description |
+|--------------|------------|-------------|
+| **Backtest** | Market (next bar open) | Simulate market order execution |
+| **Live** | MKT + ROD | Market order, rest of day |
+
 ### Signal Recording
 
 Use `SignalRecorder` to record trading signals:
@@ -764,6 +861,7 @@ if enable_match:
 | `new` / `新對話` | `clear_history()` | Clear conversation |
 | `help` / `幫助` | `show_help()` | Show help |
 | `enable <ID>` | `enable_strategy()` | Enable strategy |
+| `backtest <ID>` | `backtest_strategy()` | Execute historical backtest |
 | `disable <ID>` | `disable_strategy()` | Disable strategy |
 
 ### Design Principles

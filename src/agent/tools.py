@@ -37,7 +37,7 @@ class TradingTools:
         if valid_symbols:
             self._valid_symbols = valid_symbols
         else:
-            self._valid_symbols = ["TXF", "MXF", "TMF", "T5F", "XIF", "TE"]
+            self._valid_symbols = ["TXF", "MXF", "TMF"]
         
         # 期貨代碼與中文名稱對應表
         self._futures_names: Dict[str, str] = {}
@@ -95,10 +95,7 @@ class TradingTools:
                 self._futures_names = {
                     "TXF": "臺股期貨",
                     "MXF": "小型臺指",
-                    "TMF": "微型臺指期貨",
-                    "T5F": "臺灣50期貨",
-                    "XIF": "非金電期貨",
-                    "TE": "電子期貨"
+                    "TMF": "微型臺指期貨"
                 }
     
     def get_futures_name(self, symbol: str) -> str:
@@ -110,8 +107,18 @@ class TradingTools:
         if not self._futures_names:
             self.update_valid_symbols()
         
-        items = [f"- {code}: {name}" for code, name in self._futures_names.items()]
-        return "\n".join(items[:20])  # 限制顯示前20個
+        futures_specs = {
+            "TXF": "臺股期貨 (200元/點)",
+            "MXF": "小型臺指 (50元/點)",
+            "TMF": "微型臺指 (10元/點)",
+        }
+        
+        items = []
+        for code, name in self._futures_names.items():
+            spec = futures_specs.get(code, "")
+            items.append(f"- {code}: {name} {spec}")
+        
+        return "\n".join(items[:20])
     
     # ========== 策略工具 ==========
     
@@ -918,15 +925,12 @@ K線週期: {params['timeframe']}
 TXF - 臺股期貨
 MXF - 小型臺指
 TMF - 微型臺指
-T5F - 臺灣50期貨
-XIF - 非金電期貨
-TE - 電子期貨
-        
+
 請輸入代碼（如：TXF）"""
         
         elif self._create_step == "symbol":
             symbol = user_input.upper()
-            valid_symbols = ["TXF", "MXF", "TMF", "T5F", "XIF", "TE"]
+            valid_symbols = ["TXF", "MXF", "TMF"]
             if symbol not in valid_symbols:
                 return f"❌ 無效的期貨代碼，請輸入：{', '.join(valid_symbols)}"
             self._pending_create_data["symbol"] = symbol
@@ -1884,6 +1888,51 @@ Shioaji: {'✅ 連線' if conn_status else '❌ 斷線'}
 """
         
         return text
+    
+    def backtest_strategy(self, strategy_id: str) -> str:
+        """執行歷史回測
+        
+        Args:
+            strategy_id: 策略 ID
+            
+        Returns:
+            str: 回測報告
+        """
+        strategy = self.strategy_mgr.get_strategy(strategy_id)
+        if not strategy:
+            return f"❌ 找不到策略: {strategy_id}"
+        
+        if not strategy.verified:
+            return f"❌ 策略尚未通過驗證，無法執行回測。請先啟用策略以完成驗證。"
+        
+        if not strategy.strategy_code or not strategy.strategy_class_name:
+            return f"❌ 策略缺少程式碼，無法執行回測"
+        
+        try:
+            from src.engine.backtest_engine import BacktestEngine
+            
+            timeframe = strategy.params.get("timeframe", "15m")
+            engine = BacktestEngine(self.api)
+            
+            result = asyncio.run(engine.run_backtest(
+                strategy_code=strategy.strategy_code,
+                class_name=strategy.strategy_class_name,
+                symbol=strategy.symbol,
+                timeframe=timeframe,
+                initial_capital=1_000_000,
+                commission=0.0002
+            ))
+            
+            if result["passed"]:
+                return result["report"]
+            else:
+                return f"❌ 回測失敗: {result['error']}"
+                
+        except ImportError as e:
+            return f"❌ 請安裝 backtrader: pip install backtrader"
+        except Exception as e:
+            logger.error(f"Backtest error: {e}")
+            return f"❌ 回測發生錯誤: {str(e)}"
     
     def get_tool_definitions(self) -> list:
         """取得工具定義 (for LLM)"""

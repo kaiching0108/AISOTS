@@ -7,6 +7,7 @@
 - 🤖 **AI 策略生成** - 用自然語言描述策略，LLM 自動生成程式碼
 - 🎯 **目標驅動策略** - 只需給出目標（如「每日賺500元」），LLM 自動推斷參數並確認後建立
 - 🔒 **策略驗證** - 建立策略時自動執行兩階段驗證（LLM審查比對程式碼是否符合策略描述 + 歷史K棒回測）
+- 📊 **歷史回測** - 使用 backtesting.py 執行完整歷史回測，啟用策略前參考過去績效
 - 📈 **自我優化系統** - 設定目標 → LLM 設計策略 → 執行 → 績效分析 → LLM 審查優化 → 達成目標
 - 🔔 **Telegram Bot** - 接收命令互動，下單、成交、風控警告即時通知
 - 📊 **多種 LLM 支援** - Ollama, OpenAI, Anthropic, DeepSeek, OpenRouter
@@ -121,6 +122,8 @@ LLM 會自動推斷參數，展示給用戶確認後建立策略。
 | disable \<ID\> | 停用策略 |
 | price \<symbol\> | 查詢報價 |
 | status \<ID\> | 策略狀態 |
+| 回測 \<ID\> | 執行歷史回測 |
+| backtest \<ID\> | 執行歷史回測（英文）|
 
 #### 績效分析命令
 | 指令 | 說明 |
@@ -228,6 +231,7 @@ AISOTS/
 │   │   ├── framework.py       # 策略框架
 │   │   ├── llm_generator.py  # LLM 策略生成器
 │   │   ├── runner.py         # 策略執行器
+│   │   ├── backtest_engine.py # backtesting.py 回測引擎
 │   │   ├── rule_engine.py   # 規則引擎
 │   │   └── rule_parser.py   # 規則解析器
 │   │
@@ -282,6 +286,7 @@ AISOTS/
 - Python 3.10+
 - Shioaji API
 - pandas_ta
+- backtesting.py
 - python-telegram-bot
 - LLM (Ollama/OpenAI/Anthropic/DeepSeek)
 
@@ -296,6 +301,7 @@ AISOTS/
 | 3.1.0 | 新增自我優化系統 - 第二階段 |
 | 3.2.0 | 新增自我優化系統 - 第三階段 |
 | 3.3.0 | 新增策略程式碼兩階段驗證（LLM審查+歷史K棒回測）|
+| 3.4.0 | 新增 BacktestEngine 完整歷史回測系統 |
 
 ## License
 

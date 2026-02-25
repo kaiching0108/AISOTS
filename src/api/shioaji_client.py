@@ -41,7 +41,8 @@ class ShioajiClient:
             accounts = self.api.login(
                 api_key=self.api_key,
                 secret_key=self.secret_key,
-                contracts_timeout=10000,
+                fetch_contract=True,
+                contracts_timeout=30000,
             )
             
             # 取得期貨帳戶
@@ -74,7 +75,14 @@ class ShioajiClient:
             return False
     
     def get_contract(self, symbol: str) -> Optional[Any]:
-        """取得期貨合約"""
+        """取得期貨合約
+        
+        Args:
+            symbol: 期貨代碼（如 TXF、MXF、TMF）或完整合約代碼（如 TXFR1、TXF202503）
+            
+        Note:
+            如果傳入基本代碼（TXF/MXF/TMF），會自動轉換為近月合約（TXFR1）
+        """
         if symbol in self._contracts_cache:
             return self._contracts_cache[symbol]
         
@@ -86,8 +94,21 @@ class ShioajiClient:
                 return mock_contract
         
         try:
+            # 自動轉換基本代碼為近月合約
+            # 例如: TXF -> TXFR1, MXF -> MXFR1, TMF -> TMFR1
+            near_month_map = {
+                "TXF": "TXFR1",
+                "MXF": "MXFR1", 
+                "TMF": "TMFR1",
+            }
+            
+            original_symbol = symbol
+            if symbol in near_month_map:
+                symbol = near_month_map[symbol]
+                logger.info(f"自動使用近月合約: {original_symbol} -> {symbol}")
+            
             # 嘗試解析合約代碼
-            # 例如: TXF202301 -> TXF, 202301
+            # 例如: TXFR1 -> TXF, R1 或者 TXF202503 -> TXF, 202503
             category = symbol[:3]
             month = symbol[3:]
             
@@ -96,7 +117,7 @@ class ShioajiClient:
             if contracts:
                 contract = getattr(contracts, symbol, None)
                 if contract:
-                    self._contracts_cache[symbol] = contract
+                    self._contracts_cache[original_symbol] = contract
                     return contract
             
             return None
@@ -128,10 +149,7 @@ class ShioajiClient:
             name_map = {
                 "TXF": "臺股期貨",
                 "MXF": "小型臺指",
-                "TMF": "微型臺指期貨",
-                "T5F": "臺灣50期貨",
-                "XIF": "非金電期貨",
-                "TE": "電子期貨"
+                "TMF": "微型臺指期貨"
             }
             
             return MockContract(
@@ -235,15 +253,14 @@ class ShioajiClient:
         try:
             futures = self.api.Contracts.Futures
             if futures:
-                for attr in dir(futures):
-                    if not attr.startswith('_') and not attr.isupper():
-                        symbols.append(attr)
+                # 使用 keys() 獲取期貨代碼列表
+                symbols = list(futures.keys())
                 logger.info(f"從 Shioaji 取得可用期貨代碼: {symbols}")
         except Exception as e:
             logger.warning(f"取得期貨代碼失敗: {e}")
         
         if not symbols:
-            symbols = ["TXF", "MXF", "TMF", "T5F", "XIF", "TE"]
+            symbols = ["TXF", "MXF", "TMF"]
             logger.warning(f"使用預設期貨代碼: {symbols}")
         
         return symbols
@@ -269,10 +286,7 @@ class ShioajiClient:
             result = {
                 "TXF": "臺股期貨",
                 "MXF": "小型臺指",
-                "TMF": "微型臺指期貨",
-                "T5F": "臺灣50期貨",
-                "XIF": "非金電期貨",
-                "TE": "電子期貨"
+                "TMF": "微型臺指期貨"
             }
             logger.warning(f"使用預設期貨代碼對應表: {result}")
         
@@ -284,7 +298,7 @@ class ShioajiClient:
         action: str,
         quantity: int,
         price: float = 0,
-        price_type: str = "LMT",
+        price_type: str = "MKT",
         order_type: str = "ROD",
         octype: str = "Auto",
         timeout: int = 0,

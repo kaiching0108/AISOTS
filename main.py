@@ -783,6 +783,11 @@ class AITradingSystem:
             strategy_id = command.split(" ", 1)[1]
             return self.trading_tools.confirm_disable_strategy(strategy_id)
         
+        elif command.startswith("回測 ") or command.startswith("backtest "):
+            parts = command.split(" ", 1)
+            strategy_id = parts[1].upper()
+            return self.trading_tools.backtest_strategy(strategy_id)
+        
         elif command_lower in ["cancel", "取消"]:
             return "已取消操作"
         

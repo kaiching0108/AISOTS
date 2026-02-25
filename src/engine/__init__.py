@@ -3,6 +3,7 @@ from src.engine.rule_engine import MarketData
 from src.engine.runner import StrategyRunner
 from src.engine.framework import TradingStrategy, BarData, FillData, StrategyExecutor
 from src.engine.llm_generator import LLMGenerator
+from src.engine.backtest_engine import BacktestEngine, extract_indicators_from_code, calculate_indicators
 
 __all__ = [
     "StrategyRunner",
@@ -11,5 +12,8 @@ __all__ = [
     "FillData",
     "StrategyExecutor",
     "MarketData",
-    "LLMGenerator"
+    "LLMGenerator",
+    "BacktestEngine",
+    "extract_indicators_from_code",
+    "calculate_indicators",
 ]

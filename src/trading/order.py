@@ -15,7 +15,7 @@ class Order:
         action: str,  # Buy / Sell
         quantity: int,
         price: float = 0,
-        price_type: str = "LMT",
+        price_type: str = "MKT",
         order_type: str = "ROD",
         reason: str = ""
     ):
