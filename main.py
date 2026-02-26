@@ -909,6 +909,26 @@ async def main():
     if args.simulate:
         system.shioaji.skip_login = True
     
+    # Web 界面（可選）
+    web_config = getattr(system.config, 'web', None)
+    if web_config and web_config.enabled:
+        import threading
+        from src.web.app import create_web_app
+        
+        web_app = create_web_app(system.trading_tools)
+        web_thread = threading.Thread(
+            target=web_app.run,
+            kwargs={
+                "host": web_config.host,
+                "port": web_config.port,
+                "debug": False,
+                "use_reloader": False
+            }
+        )
+        web_thread.daemon = True
+        web_thread.start()
+        logger.info(f"Web 界面已啟動: http://{web_config.host}:{web_config.port}")
+    
     # 處理信號
     def signal_handler(sig, frame):
         print("\n收到停止信號，正在關閉...")

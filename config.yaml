@@ -59,3 +59,9 @@ auto_review:
   #   - strategy_id: "strategy_003"
   #     period: 1
   #     unit: "month"    # 每月觸發一次
+
+# Web 界面配置
+web:
+  enabled: false          # 是否啟用 Web 界面
+  host: "127.0.0.1"     # 綁定位址（本機）
+  port: 5000            # 連接埠

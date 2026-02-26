@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+
+{% block title %}策略管理 - AISOTS{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">📋 策略列表</div>
+    <div id="strategyList">
+        <div class="loading">載入中...</div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    async function loadStrategies() {
+        try {
+            const response = await fetch('/api/strategies');
+            const data = await response.json();
+            
+            if (!data.success || !data.data || data.data.length === 0) {
+                document.getElementById('strategyList').innerHTML = '<div class="empty-state">目前沒有策略</div>';
+                return;
+            }
+            
+            document.getElementById('strategyList').innerHTML = data.data.map(s => `
+                <div class="strategy-item">
+                    <div class="strategy-header">
+                        <div>
+                            <span class="badge ${s.enabled ? 'badge-success' : 'badge-danger'}">
+                                ${s.enabled ? '✅ 啟用' : '❌ 停用'}
+                            </span>
+                            <span class="strategy-name">${s.name}</span>
+                            <span style="color: #666; margin-left: 10px;">${s.id}</span>
+                        </div>
+                    </div>
+                    <div class="strategy-info">
+                        <div>期貨: ${s.symbol}</div>
+                        <div>版本: v${s.version}</div>
+                        <div>週期: ${s.timeframe || '-'}</div>
+                        <div>口數: ${s.quantity || '-'}</div>
+                    </div>
+                    ${s.position ? `
+                    <div style="margin-top: 10px; padding: 10px; background: #fff3cd; border-radius: 5px; font-size: 13px;">
+                        <strong>⚠️ 仍有部位</strong>: ${s.position.direction} ${s.position.quantity}口 @ ${s.position.entry_price}
+                        (${s.position.pnl >= 0 ? '+' : ''}${s.position.pnl})
+                    </div>
+                    ` : ''}
+                    <div class="strategy-actions">
+                        ${s.enabled ? 
+                            `<button class="btn btn-warning btn-sm" onclick="disableStrategy('${s.id}', ${s.has_position})">停用</button>` :
+                            `<button class="btn btn-success btn-sm" onclick="enableStrategy('${s.id}')">啟用</button>`
+                        }
+                        <button class="btn btn-primary btn-sm" onclick="runBacktest('${s.id}')">回測</button>
+                        <button class="btn btn-danger btn-sm" onclick="deleteStrategy('${s.id}', ${s.has_position})">刪除</button>
+                    </div>
+                </div>
+            `).join('');
+        } catch (e) {
+            console.error(e);
+            document.getElementById('strategyList').innerHTML = '<div class="empty-state">載入失敗</div>';
+        }
+    }
+    
+    async function enableStrategy(id) {
+        const result = await apiCall('/api/strategies/' + id + '/enable', 'POST');
+        alert(result.message);
+        loadStrategies();
+    }
+    
+    async function disableStrategy(id, hasPosition) {
+        if (hasPosition) {
+            const checkRes = await apiCall('/api/strategies/' + id + '/disable', 'POST');
+            if (checkRes.needs_confirmation) {
+                showModal(
+                    checkRes.title,
+                    checkRes.message,
+                    checkRes.risks,
+                    async () => {
+                        const result = await apiCall('/api/strategies/' + id + '/disable', 'DELETE');
+                        closeModal();
+                        alert(result.message);
+                        loadStrategies();
+                    }
+                );
+                return;
+            }
+            alert(checkRes.message);
+        } else {
+            const result = await apiCall('/api/strategies/' + id + '/disable', 'POST');
+            alert(result.message);
+        }
+        loadStrategies();
+    }
+    
+    async function deleteStrategy(id, hasPosition) {
+        if (hasPosition) {
+            const checkRes = await apiCall('/api/strategies/' + id, 'DELETE');
+            if (checkRes.needs_confirmation) {
+                showModal(
+                    checkRes.title,
+                    checkRes.message,
+                    checkRes.risks,
+                    async () => {
+                        const result = await apiCall('/api/strategies/' + id + '/delete', 'DELETE');
+                        closeModal();
+                        alert(result.message);
+                        loadStrategies();
+                    }
+                );
+                return;
+            }
+            alert(checkRes.message);
+        } else {
+            if (!confirm('確定要刪除這個策略嗎？')) return;
+            const result = await apiCall('/api/strategies/' + id, 'DELETE');
+            alert(result.message);
+        }
+        loadStrategies();
+    }
+    
+    async function runBacktest(id) {
+        if (!confirm('確定要執行回測嗎？')) return;
+        
+        const result = await apiCall('/api/backtest/' + id, 'POST');
+        if (result.success) {
+            alert('回測完成！\n\n' + result.report);
+        } else {
+            alert('回測失敗: ' + (result.error || result.report));
+        }
+    }
+    
+    loadStrategies();
+    setInterval(loadStrategies, REFRESH_INTERVAL);
+</script>
+{% endblock %}

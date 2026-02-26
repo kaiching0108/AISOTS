@@ -25,3 +25,6 @@ httpx>=0.24
 
 # Notifications
 python-telegram-bot>=20.0
+
+# Web Interface
+flask>=3.0

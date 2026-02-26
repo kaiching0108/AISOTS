@@ -92,6 +92,13 @@ class AutoReviewConfig(BaseModel):
     schedules: List[AutoReviewSchedule] = []
 
 
+class WebConfig(BaseModel):
+    """Web 界面配置"""
+    enabled: bool = False
+    host: str = "127.0.0.1"
+    port: int = 5000
+
+
 class AppConfig(BaseModel):
     shioaji: ShioajiConfig
     llm: LLMConfig
@@ -100,6 +107,7 @@ class AppConfig(BaseModel):
     trading: TradingConfig
     strategies: list[StrategyConfig] = []
     auto_review: AutoReviewConfig = AutoReviewConfig()
+    web: Optional[WebConfig] = None
 
 
 def load_config(config_path: str = "config.yaml") -> AppConfig:

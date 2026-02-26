@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}部位查詢 - AISOTS{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">📦 部位列表</div>
+    <div id="positionList">
+        <div class="loading">載入中...</div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    async function loadPositions() {
+        try {
+            const response = await fetch('/api/positions');
+            const data = await response.json();
+            
+            if (!data.success || !data.data || data.data.length === 0) {
+                document.getElementById('positionList').innerHTML = '<div class="empty-state">目前沒有部位</div>';
+                return;
+            }
+            
+            document.getElementById('positionList').innerHTML = `
+                <div style="margin-bottom: 15px; font-weight: bold;">
+                    總口數: ${data.summary.total_quantity} | 總損益: <span class="${data.summary.total_pnl >= 0 ? 'pnl-positive' : 'pnl-negative'}">
+                        ${data.summary.total_pnl >= 0 ? '+' : ''}${data.summary.total_pnl.toLocaleString()}
+                    </span>
+                </div>
+            ` + data.data.map(p => `
+                <div class="position-item">
+                    <div>
+                        <strong>${p.symbol}</strong> ${p.direction} ${p.quantity}口
+                        <div style="font-size: 12px; color: #666;">
+                            進場: ${p.entry_price} → 現價: ${p.current_price}
+                        </div>
+                    </div>
+                    <div class="${p.pnl >= 0 ? 'pnl-positive' : 'pnl-negative'}" style="font-size: 18px; font-weight: bold;">
+                        ${p.pnl >= 0 ? '+' : ''}${p.pnl.toLocaleString()}
+                    </div>
+                </div>
+            `).join('');
+        } catch (e) {
+            console.error(e);
+            document.getElementById('positionList').innerHTML = '<div class="empty-state">載入失敗</div>';
+        }
+    }
+    
+    loadPositions();
+    setInterval(loadPositions, REFRESH_INTERVAL);
+</script>
+{% endblock %}

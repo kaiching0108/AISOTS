@@ -20,7 +20,8 @@ AISOTS/
 │   ├── risk/             # Risk management
 │   ├── storage/          # JSON data persistence
 │   ├── agent/            # AI agent tools and LLM providers
-│   └── notify/           # Telegram notifications & bot
+│   ├── notify/           # Telegram notifications & bot
+│   └── web/              # Web Interface (Flask)
 ├── tests/                 # Test files
 ├── workspace/            # Runtime data (JSON files)
 └── documents/            # Documentation
@@ -903,4 +904,84 @@ if new_cmd_match:
     result = self.trading_tools.new_command_function()
     self._add_to_history(command, result)
     return result
+```
+
+---
+
+## Web Interface
+
+### Overview
+
+The system includes a Web Interface for graphical management of strategies and positions through a web browser.
+
+### Startup
+
+Edit `config.yaml`:
+
+```yaml
+web:
+  enabled: true
+  host: "127.0.0.1"
+  port: 5000
+```
+
+Then start the system:
+
+```bash
+python main.py
+```
+
+Access: `http://127.0.0.1:5000`
+
+### Pages
+
+| Page | Function |
+|------|----------|
+| `/` | System overview |
+| `/strategies` | Strategy management (enable/disable/delete/backtest) |
+| `/positions` | Position list |
+
+### API Endpoints
+
+| Method | URL | Description |
+|--------|-----|-------------|
+| GET | `/api/status` | System status |
+| GET | `/api/strategies` | Strategy list |
+| POST | `/api/strategies/<id>/enable` | Enable strategy |
+| POST | `/api/strategies/<id>/disable` | Disable strategy |
+| DELETE | `/api/strategies/<id>` | Delete strategy |
+| GET | `/api/positions` | Position list |
+| GET | `/api/risk` | Risk status |
+| POST | `/api/backtest/<id>` | Run backtest |
+
+### Modal Confirmation
+
+When disabling/deleting a strategy with positions, the API returns modal confirmation data:
+
+```json
+{
+    "needs_confirmation": true,
+    "title": "確認停用",
+    "message": "此策略仍有部位，停用將強制平倉",
+    "risks": ["強制平倉 (1口 TXF)", "策略將被停用"]
+}
+```
+
+### Design Principles
+
+- **Thread Safety**: Uses `threading.Lock` to protect shared state
+- **Error Isolation**: Web errors don't affect the main trading system
+- **Config-Driven**: Enabled via `config.yaml`
+
+### File Structure
+
+```
+src/web/
+├── app.py               # Flask application factory
+└── routes/
+    ├── status.py      # /api/status
+    ├── strategies.py # /api/strategies
+    ├── positions.py  # /api/positions
+    ├── risk.py       # /api/risk
+    └── backtest.py   # /api/backtest
 ```
