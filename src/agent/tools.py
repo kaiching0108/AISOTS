@@ -132,44 +132,45 @@ class TradingTools:
             return "目前沒有任何策略"
         
         text = f"📋 策略列表（共 {len(strategies)} 個）\n"
-        text += "────────────────────\n\n"
+        text += "═══════════════════════════════════════\n\n"
         
         for s in strategies:
             status = "✅ 啟用" if s.enabled else "❌ 停用"
             
-            # 策略名稱和狀態
-            text += f"{status} {s.name}\n"
-            text += f"• ID: {s.id}\n"
-            text += f"• 期貨代碼: {s.symbol}（{self.get_futures_name(s.symbol)}）\n"
-            text += f"• 版本: v{s.strategy_version}\n"
-            
-            # 策略描述（prompt）
-            if s.prompt:
-                prompt_short = s.prompt[:50] + "..." if len(s.prompt) > 50 else s.prompt
-                text += f"• 策略描述: {prompt_short}\n"
+            text += f"【{status}】{s.name}\n"
+            text += f"  ID: {s.id} | 期貨: {s.symbol}（{self.get_futures_name(s.symbol)}）| v{s.strategy_version}\n"
             
             # 參數
             params = s.params or {}
+            params_line = []
             if params.get("timeframe"):
-                text += f"• K線週期: {params.get('timeframe')}\n"
+                params_line.append(f"週期: {params.get('timeframe')}")
             if params.get("quantity"):
-                text += f"• 口數: {params.get('quantity')}口\n"
+                params_line.append(f"口數: {params.get('quantity')}口")
             if params.get("stop_loss"):
-                text += f"• 停損: {params.get('stop_loss')}點\n"
+                params_line.append(f"停損: {params.get('stop_loss')}點")
             if params.get("take_profit"):
-                text += f"• 止盈: {params.get('take_profit')}點\n"
+                params_line.append(f"止盈: {params.get('take_profit')}點")
+            
+            if params_line:
+                text += "  " + " | ".join(params_line) + "\n"
             
             # 目標
             if s.goal:
                 unit_names = {"daily": "每日", "weekly": "每週", "monthly": "每月"}
                 unit = unit_names.get(s.goal_unit, s.goal_unit)
                 goal_val = int(s.goal) if str(s.goal).isdigit() else s.goal
-                text += f"• 目標: {unit}賺 {goal_val} 元\n"
+                text += f"  目標: {unit}賺 {goal_val} 元\n"
             
-            text += "\n"
+            # 策略描述（簡短）
+            if s.prompt:
+                prompt_short = s.prompt[:40] + "..." if len(s.prompt) > 40 else s.prompt
+                text += f"  描述: {prompt_short}\n"
+            
+            text += "─────────────────────────────────────────\n"
         
-        text += "────────────────────\n"
-        text += "輸入「策略 <ID>」查看詳細狀態"
+        text += "═══════════════════════════════════════\n"
+        text += "輸入「status <ID>」查看詳細狀態"
         
         return text
     
