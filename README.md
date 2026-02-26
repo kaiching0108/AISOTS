@@ -241,11 +241,6 @@ AISOTS/
 │   │   ├── rule_engine.py   # 規則引擎
 │   │   └── rule_parser.py   # 規則解析器
 │   │
-│   ├── analysis/          # 績效分析模組
-│   │   ├── signal_recorder.py    # 訊號記錄器
-│   │   ├── performance_analyzer.py # 績效分析器
-│   │   └── strategy_reviewer.py  # LLM 策略審查
-│   │
 │   ├── agent/            # AI Agent
 │   │   ├── tools.py          # 交易工具
 │   │   ├── prompts.py       # 提示詞
@@ -265,12 +260,28 @@ AISOTS/
 │   ├── notify/          # 通知系統
 │   │   └── telegram.py  # Telegram 通知 + Bot
 │   │
+│   ├── web/            # Web 界面
+│   │   ├── app.py          # Flask 應用
+│   │   └── routes/         # API 路由
+│   │       ├── status.py
+│   │       ├── strategies.py
+│   │       ├── positions.py
+│   │       ├── risk.py
+│   │       └── backtest.py
+│   │
+│   ├── analysis/        # 績效分析模組
+│   │   ├── signal_recorder.py       # 訊號記錄器
+│   │   ├── performance_analyzer.py  # 績效分析器
+│   │   ├── strategy_reviewer.py     # LLM 策略審查
+│   │   └── auto_review_scheduler.py # 自動 Review 排程
+│   │
 │   └── config.py        # 配置載入
 │
 ├── documents/           # 說明文件
 │   ├── Features.md
 │   ├── System_Architecture.md
-│   └── User_Manual.md
+│   ├── User_Manual.md
+│   └── Web_Interface.md
 │
 ├── tests/               # 測試檔案
 │   ├── test_trading.py
@@ -279,10 +290,17 @@ AISOTS/
 │   └── conftest.py
 │
 └── workspace/          # 執行時資料
-    ├── strategies.json   # 策略配置
-    ├── positions.json   # 部位記錄
-    ├── orders.json     # 訂單記錄
-    ├── signals.json    # 訊號記錄
+    ├── strategies/       # 策略配置（含版本）
+    │   └── TMF260001_v1.json
+    ├── positions/        # 部位記錄
+    │   └── TMF260001_positions.json
+    ├── orders/           # 訂單記錄
+    │   └── TMF260001_orders.json
+    ├── signals/         # 訊號記錄（含版本）
+    │   └── TMF260001_v1.json
+    ├── backtests/       # 回測圖表
+    │   └── TMF260001.png
+    ├── performance.json # 績效數據
     └── logs/
         └── trading.log
 ```
@@ -308,6 +326,7 @@ AISOTS/
 | 3.2.0 | 新增自我優化系統 - 第三階段 |
 | 3.3.0 | 新增策略程式碼兩階段驗證（LLM審查+歷史K棒回測）|
 | 3.4.0 | 新增 BacktestEngine 完整歷史回測系統 |
+| 3.5.0 | 新增 Web 界面、刪除策略二次確認、回測圖表匯出 |
 
 ## License
 

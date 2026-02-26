@@ -1,5 +1,7 @@
 # AI Futures Trading System - Agent Guidelines
 
+**文件版本**: 3.5.0
+
 ## Overview
 
 This is an AI-powered futures trading system using Shioaji API (Taiwan Futures Exchange), with support for multiple trading strategies, risk management, Telegram notifications, and LLM-based strategy generation.
