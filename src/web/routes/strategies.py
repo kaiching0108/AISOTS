@@ -83,6 +83,7 @@ def get_strategy(strategy_id):
                 "is_running": strategy.is_running,
                 "version": strategy.strategy_version,
                 "prompt": strategy.prompt,
+                "strategy_code": strategy.strategy_code,
                 "params": strategy.params,
                 "goal": strategy.goal,
                 "goal_unit": strategy.goal_unit,

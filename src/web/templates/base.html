@@ -258,6 +258,21 @@
             padding: 40px;
             color: #999;
         }
+        
+        /* Code block styling */
+        pre {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+        
+        code {
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+        }
     </style>
     {% block extra_css %}{% endblock %}
 </head>
@@ -286,6 +301,19 @@
             <div class="modal-footer">
                 <button class="btn" onclick="closeModal()">取消</button>
                 <button class="btn btn-danger" id="modalConfirmBtn">確認</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Code View Modal -->
+    <div id="codeModal" class="modal">
+        <div class="modal-content" style="max-width: 800px; max-height: 90vh;">
+            <div class="modal-header" id="codeModalTitle">📄 策略程式碼</div>
+            <div class="modal-body" style="overflow: auto; max-height: 70vh;">
+                <pre><code id="codeContent" class="language-python"></code></pre>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeCodeModal()">關閉</button>
             </div>
         </div>
     </div>
@@ -334,6 +362,23 @@
         document.getElementById('confirmModal').addEventListener('click', function(e) {
             if (e.target === this) {
                 closeModal();
+            }
+        });
+        
+        // Code modal functions
+        function showCodeModal(title, code) {
+            document.getElementById('codeModalTitle').textContent = '📄 ' + title;
+            document.getElementById('codeContent').textContent = code || '(無程式碼)';
+            document.getElementById('codeModal').classList.add('active');
+        }
+        
+        function closeCodeModal() {
+            document.getElementById('codeModal').classList.remove('active');
+        }
+        
+        document.getElementById('codeModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeCodeModal();
             }
         });
         

@@ -52,6 +52,7 @@
                             `<button class="btn btn-success btn-sm" onclick="enableStrategy('${s.id}')">啟用</button>`
                         }
                         <button class="btn btn-primary btn-sm" onclick="runBacktest('${s.id}')">回測</button>
+                        <button class="btn btn-info btn-sm" onclick="viewCode('${s.id}')">📄</button>
                         <button class="btn btn-danger btn-sm" onclick="deleteStrategy('${s.id}', ${s.has_position})">刪除</button>
                     </div>
                 </div>
@@ -127,6 +128,15 @@
             alert('回測完成！\n\n' + result.report);
         } else {
             alert('回測失敗: ' + (result.error || result.report));
+        }
+    }
+    
+    async function viewCode(id) {
+        const result = await apiCall('/api/strategies/' + id, 'GET');
+        if (result.success && result.data) {
+            showCodeModal(result.data.name + ' (' + id + ')', result.data.strategy_code);
+        } else {
+            alert('載入失敗: ' + (result.error || '未知錯誤'));
         }
     }
     
