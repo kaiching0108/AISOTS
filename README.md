@@ -23,7 +23,7 @@ cd AISOTS
 pip install -r requirements.txt
 ```
 
-## Telegram 
+## Telegram for Notify 
 - Create a bot
   - Open Telegram, search @BotFather
   - Send /newbot, follow prompts
@@ -65,14 +65,6 @@ trading:
     night_start: "15:00"
     night_end: "05:00"
 
-# 自動 LLM Review 排程
-auto_review:
-  enabled: false
-  # schedules:
-  #   - strategy_id: "TMF260001"
-  #     period: 5
-  #     unit: "day"      # 每 5 天觸發一次
-
 # Web 界面配置（主要操作界面）
 web:
   enabled: true          # 啟用 Web 界面（主要操作平台）
@@ -90,45 +82,34 @@ python main.py
 python main.py --simulate
 ```
 
-### 建立策略的兩種方式 (by Telegram)
+### 透過 Web 界面建立策略
 
-#### 方式一：手動輸入（問答式）
-```
-create
-```
-系統會一步一步詢問：
-1. 策略名稱
-2. 期貨代碼（TXF/MXF/TMF）
-3. 策略描述
+訪問 `http://127.0.0.1:5001/strategies/create`，填寫表單：
+
+1. 提示詞輸入策略，選擇期貨代碼（TXF/MXF/TMF）
+2. 交易方向（做多/做空/多空都做）
+3. 策略描述（如「RSI 低於 30 買入，高於 70 賣出」）
 4. K線週期（1m/5m/15m/30m/60m/1h/1d）
-5. 交易口數
-6. 停損點數
-7. 止盈點數
-8. 確認建立
+5. 停損點數、止盈點數、交易口數
+6. 點擊 Generate 由AI生成策略描述預覽
+7. 確認參數後點擊「確認建立」
 
-#### 方式二：目標驅動（LLM 驅動）
-```
-幫我設計一個 RSI 策略
-設計一個每日賺500元的策略
-```
-LLM 會自動推斷參數，展示給用戶確認後建立策略。
+系統會自動執行兩階段驗證：
+- Stage 1：LLM 自我審查（檢查程式碼是否符合策略描述）
+- Stage 2：歷史回測（檢查訊號分佈是否合理）
 
-### Telegram 命令列表
+驗證通過後，策略建立成功。
 
-**注意**：Telegram Bot 仅用于发送通知，不接受命令。以下命令请通过 **Web 界面** (`http://127.0.0.1:5001`) 执行：
+### Telegram 通知
 
-#### Web 界面操作对应表
-| Web 界面功能 | 說明 |
-|------|------|
-| 策略创建页面 | 表单式建立策略 |
-| 系统总览 | 系統狀態 |
-| 部位页面 | 目前部位 |
-| 策略管理 | 策略列表、啟用/停用/刪除 |
-| 回测功能 | 執行歷史回測（包含圖表）|
-| 目标设定 | 設定策略目標 |
-| 绩效分析 | 查詢策略歷史績效 |
+Telegram 機器人 **僅用於接收通知**。
 
-**所有操作均通过 Web 界面完成，Telegram 仅接收通知。**
+通知類型：
+- 系統啟動/停止
+- 成交通知
+- 停損/止盈觸發
+- 風控警告
+- 系統錯誤
 
 ## 自我優化系統
 
