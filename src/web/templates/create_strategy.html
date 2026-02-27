@@ -1,0 +1,704 @@
+{% extends "base.html" %}
+
+{% block title %}創建策略 - AISOTS{% endblock %}
+
+{% block extra_css %}
+<style>
+    .create-strategy-container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 20px;
+    }
+    
+    .strategy-panel {
+        background: white;
+        border-radius: 12px;
+        padding: 24px;
+        margin-bottom: 24px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    
+    .panel-title {
+        font-size: 18px;
+        font-weight: 600;
+        margin-bottom: 20px;
+        padding-bottom: 12px;
+        border-bottom: 2px solid #3498db;
+        color: #2c3e50;
+    }
+    
+    .form-row {
+        display: flex;
+        gap: 16px;
+        margin-bottom: 16px;
+        align-items: flex-start;
+    }
+    
+    .form-group {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+    }
+    
+    .form-group label {
+        font-size: 14px;
+        font-weight: 500;
+        color: #555;
+        margin-bottom: 6px;
+    }
+    
+    .form-group label .required {
+        color: #e74c3c;
+    }
+    
+    .form-group select,
+    .form-group input {
+        padding: 10px 12px;
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        font-size: 14px;
+        transition: border-color 0.2s;
+    }
+    
+    .form-group select:focus,
+    .form-group input:focus {
+        outline: none;
+        border-color: #3498db;
+    }
+    
+    .form-group textarea {
+        padding: 12px;
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        font-size: 14px;
+        font-family: inherit;
+        resize: vertical;
+        min-height: 120px;
+        transition: border-color 0.2s;
+    }
+    
+    .form-group textarea:focus {
+        outline: none;
+        border-color: #3498db;
+    }
+    
+    .btn {
+        padding: 12px 24px;
+        border: none;
+        border-radius: 6px;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+    
+    .btn-primary {
+        background: #3498db;
+        color: white;
+    }
+    
+    .btn-primary:hover {
+        background: #2980b9;
+    }
+    
+    .btn-success {
+        background: #27ae60;
+        color: white;
+    }
+    
+    .btn-success:hover {
+        background: #219a52;
+    }
+    
+    .btn:disabled {
+        background: #bdc3c7;
+        cursor: not-allowed;
+    }
+    
+    .button-group {
+        display: flex;
+        gap: 12px;
+        margin-top: 20px;
+    }
+    
+    .loading {
+        text-align: center;
+        padding: 40px;
+        color: #666;
+    }
+    
+    .loading::after {
+        content: '';
+        display: inline-block;
+        width: 20px;
+        height: 20px;
+        border: 2px solid #3498db;
+        border-top-color: transparent;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin-left: 10px;
+        vertical-align: middle;
+    }
+    
+    @keyframes spin {
+        to { transform: rotate(360deg); }
+    }
+    
+    .result-success {
+        background: #d4edda;
+        border: 1px solid #c3e6cb;
+        color: #155724;
+        padding: 16px;
+        border-radius: 6px;
+        margin-top: 16px;
+    }
+    
+    .result-error {
+        background: #f8d7da;
+        border: 1px solid #f5c6cb;
+        color: #721c24;
+        padding: 16px;
+        border-radius: 6px;
+        margin-top: 16px;
+    }
+    
+    .verification-stage {
+        margin: 12px 0;
+        padding: 12px;
+        background: #f8f9fa;
+        border-radius: 6px;
+    }
+    
+    .verification-stage.passed {
+        background: #d4edda;
+    }
+    
+    .verification-stage.failed {
+        background: #f8d7da;
+    }
+    
+    .stage-status {
+        font-weight: 600;
+    }
+    
+    .stage-status.passed::before {
+        content: '✅ ';
+    }
+    
+    .stage-status.failed::before {
+        content: '❌ ';
+    }
+    
+    .backtest-chart {
+        max-width: 100%;
+        margin-top: 16px;
+        border-radius: 8px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    
+    .hidden {
+        display: none;
+    }
+    
+    .hint {
+        font-size: 12px;
+        color: #888;
+        margin-top: 4px;
+    }
+    
+    /* 進度條樣式 */
+    .progress-container {
+        margin: 20px 0;
+        padding: 20px;
+        background: #f8f9fa;
+        border-radius: 8px;
+    }
+    
+    .progress-message {
+        font-size: 14px;
+        color: #333;
+        margin-bottom: 12px;
+        display: flex;
+        align-items: center;
+    }
+    
+    .progress-message::before {
+        content: '';
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        background: #3498db;
+        border-radius: 50%;
+        margin-right: 10px;
+        animation: pulse 1.5s infinite;
+    }
+    
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.4; }
+    }
+    
+    .progress-bar {
+        width: 100%;
+        height: 8px;
+        background: #e9ecef;
+        border-radius: 4px;
+        overflow: hidden;
+    }
+    
+    .progress-bar-fill {
+        height: 100%;
+        background: linear-gradient(90deg, #3498db, #2ecc71);
+        border-radius: 4px;
+        transition: width 0.3s ease;
+        width: 0%;
+    }
+    
+    .progress-steps {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 12px;
+        font-size: 12px;
+        color: #888;
+    }
+    
+    .progress-step {
+        text-align: center;
+        flex: 1;
+    }
+    
+    .progress-step.active {
+        color: #3498db;
+        font-weight: 600;
+    }
+    
+    .progress-step.completed {
+        color: #27ae60;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="create-strategy-container">
+    <h1 style="margin-bottom: 24px;">創建新策略</h1>
+    
+        <!-- 上視窗：用戶輸入 -->
+    <div class="strategy-panel" id="inputPanel">
+        <div class="panel-title">📝 輸入策略參數</div>
+        
+        <div class="form-row">
+            <div class="form-group" style="flex: 0 0 200px;">
+                <label>期貨代碼 <span class="required">*</span></label>
+                <select id="symbol" required>
+                    <option value="">選擇...</option>
+                    <option value="TXF">TXF (大台)</option>
+                    <option value="MXF">MXF (小台)</option>
+                    <option value="TMF">TMF (微台)</option>
+                </select>
+            </div>
+            
+            <div class="form-group" style="flex: 0 0 150px;">
+                <label>時間框架</label>
+                <select id="timeframe">
+                    <option value="1m">1 分鐘</option>
+                    <option value="5m">5 分鐘</option>
+                    <option value="15m" selected>15 分鐘</option>
+                    <option value="30m">30 分鐘</option>
+                    <option value="60m">1 小時</option>
+                    <option value="1d">1 日</option>
+                </select>
+            </div>
+            
+            <div class="form-group" style="flex: 0 0 120px;">
+                <label>口數</label>
+                <input type="number" id="quantity" value="1" min="1" max="10">
+            </div>
+            
+            <div class="form-group" style="flex: 0 0 180px;">
+                <label>交易方向</label>
+                <select id="direction">
+                    <option value="long" selected>做多 (Long)</option>
+                    <option value="short">做空 (Short)</option>
+                    <option value="both">多空都做</option>
+                </select>
+            </div>
+        </div>
+        
+        <div class="form-row">
+            <div class="form-group" style="flex: 0 0 150px;">
+                <label>停損 (点)</label>
+                <input type="number" id="stopLoss" placeholder="例如: 30">
+            </div>
+            
+            <div class="form-group" style="flex: 0 0 150px;">
+                <label>止盈 (点)</label>
+                <input type="number" id="takeProfit" placeholder="例如: 50">
+            </div>
+        </div>
+        
+        <div class="form-row">
+            <div class="form-group">
+                <label>策略提示詞 <span class="required">*</span></label>
+                <textarea id="prompt" placeholder="描述您的交易策略...
+例如：
+- 每日赚500元
+- RSI低于30买入，RSI高于70卖出
+- 均线交叉策略
+- 布林通道突破策略
+
+您可以输入完整的策略描述，也可以只输入目标（如：每日赚500元），系统会帮您推断参数。"></textarea>
+                <div class="hint">输入您的交易策略想法，描述越详细越好。系统会根据您的输入推断合适的参数。</div>
+            </div>
+        </div>
+        
+        <div class="button-group">
+            <button class="btn btn-primary" id="generateBtn" onclick="generatePreview()">
+                ✨ Generate - 让 LLM 填充参数
+            </button>
+        </div>
+    </div>
+    
+    <!-- 下视窗：LLM 建议 / 用户確認 -->
+    <div class="strategy-panel hidden" id="previewPanel">
+        <div class="panel-title">🤖 LLM 建议 / 確認</div>
+        
+        <div class="form-row">
+            <div class="form-group" style="flex: 0 0 200px;">
+                <label>期貨代碼</label>
+                <select id="previewSymbol">
+                    <option value="TXF">TXF (大台)</option>
+                    <option value="MXF">MXF (小台)</option>
+                    <option value="TMF">TMF (微台)</option>
+                </select>
+            </div>
+            
+            <div class="form-group" style="flex: 0 0 150px;">
+                <label>時間框架</label>
+                <select id="previewTimeframe">
+                    <option value="1m">1 分鐘</option>
+                    <option value="5m">5 分鐘</option>
+                    <option value="15m">15 分鐘</option>
+                    <option value="30m">30 分鐘</option>
+                    <option value="60m">1 小時</option>
+                    <option value="1d">1 日</option>
+                </select>
+            </div>
+            
+            <div class="form-group" style="flex: 0 0 120px;">
+                <label>口數</label>
+                <input type="number" id="previewQuantity" min="1" max="10">
+            </div>
+            
+            <div class="form-group" style="flex: 0 0 180px;">
+                <label>交易方向</label>
+                <select id="previewDirection">
+                    <option value="long">做多 (Long)</option>
+                    <option value="short">做空 (Short)</option>
+                    <option value="both">多空都做</option>
+                </select>
+            </div>
+        </div>
+        
+        <div class="form-row">
+            <div class="form-group" style="flex: 0 0 150px;">
+                <label>停損 (点)</label>
+                <input type="number" id="previewStopLoss">
+            </div>
+            
+            <div class="form-group" style="flex: 0 0 150px;">
+                <label>止盈 (点)</label>
+                <input type="number" id="previewTakeProfit">
+            </div>
+        </div>
+        
+        <div class="form-row">
+            <div class="form-group">
+                <label>策略描述 (Prompt)</label>
+                <textarea id="previewPrompt"></textarea>
+            </div>
+        </div>
+        
+        <div class="button-group">
+            <button class="btn btn-success" id="confirmBtn" onclick="confirmStrategy()">
+                ✅ 確認并生成策略代码
+            </button>
+            <button class="btn btn-primary" onclick="showInputPanel()">
+                ← 返回修改
+            </button>
+        </div>
+    </div>
+    
+    <!-- 驗證结果顯示 -->
+    <div class="strategy-panel hidden" id="resultPanel">
+        <div class="panel-title">📊 驗證结果</div>
+        
+        <div id="verificationContent">
+            <div class="loading">正在驗證策略...</div>
+        </div>
+    </div>
+</div>
+
+<script>
+function showInputPanel() {
+    document.getElementById('inputPanel').classList.remove('hidden');
+    document.getElementById('previewPanel').classList.add('hidden');
+    document.getElementById('resultPanel').classList.add('hidden');
+}
+
+function showPreviewPanel() {
+    document.getElementById('inputPanel').classList.add('hidden');
+    document.getElementById('previewPanel').classList.remove('hidden');
+    document.getElementById('resultPanel').classList.add('hidden');
+}
+
+function showResultPanel() {
+    document.getElementById('inputPanel').classList.add('hidden');
+    document.getElementById('previewPanel').classList.add('hidden');
+    document.getElementById('resultPanel').classList.remove('hidden');
+}
+
+async function generatePreview() {
+    const symbol = document.getElementById('symbol').value;
+    const prompt = document.getElementById('prompt').value;
+    const direction = document.getElementById('direction').value;
+    
+    if (!symbol) {
+        alert('请選擇期貨代碼');
+        return;
+    }
+    if (!prompt) {
+        alert('请输入策略提示詞');
+        return;
+    }
+    
+    const btn = document.getElementById('generateBtn');
+    btn.disabled = true;
+    btn.textContent = '處理中...';
+    
+    try {
+        const response = await fetch('/api/strategies/preview', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                symbol: symbol,
+                prompt: prompt,
+                direction: direction,
+                timeframe: document.getElementById('timeframe').value,
+                stop_loss: document.getElementById('stopLoss').value || null,
+                take_profit: document.getElementById('takeProfit').value || null,
+                quantity: parseInt(document.getElementById('quantity').value) || 1
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            // 填充下视窗
+            document.getElementById('previewSymbol').value = data.data.symbol;
+            document.getElementById('previewTimeframe').value = data.data.timeframe;
+            document.getElementById('previewQuantity').value = data.data.quantity;
+            document.getElementById('previewStopLoss').value = data.data.stop_loss || '';
+            document.getElementById('previewTakeProfit').value = data.data.take_profit || '';
+            document.getElementById('previewPrompt').value = data.data.prompt;
+            
+            // 設置交易方向
+            if (data.data.direction) {
+                document.getElementById('previewDirection').value = data.data.direction;
+            }
+            
+            showPreviewPanel();
+        } else {
+            alert('生成预览失敗: ' + data.message);
+        }
+    } catch (error) {
+        alert('請求失敗: ' + error.message);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '✨ Generate - 让 LLM 填充参数';
+    }
+}
+
+async function confirmStrategy() {
+    const btn = document.getElementById('confirmBtn');
+    btn.disabled = true;
+    btn.textContent = '處理中...';
+    
+    showResultPanel();
+    
+    const verificationContent = document.getElementById('verificationContent');
+    
+    // 顯示進度條
+    verificationContent.innerHTML = `
+        <div class="progress-container">
+            <div class="progress-message" id="progressMessage">正在準備...</div>
+            <div class="progress-bar">
+                <div class="progress-bar-fill" id="progressBar" style="width: 0%"></div>
+            </div>
+            <div class="progress-steps">
+                <div class="progress-step active" id="step1">1. 建立策略</div>
+                <div class="progress-step" id="step2">2. 生成代碼</div>
+                <div class="progress-step" id="step3">3. LLM 審查</div>
+                <div class="progress-step" id="step4">4. 歷史回測</div>
+                <div class="progress-step" id="step5">5. 完成</div>
+            </div>
+        </div>
+    `;
+    
+    // 模擬進度更新
+    let currentStep = 0;
+    const steps = [
+        { step: 1, message: '🔄 正在建立策略...', percent: 10 },
+        { step: 2, message: '📝 正在生成策略程式碼...', percent: 30 },
+        { step: 3, message: '🔍 正在進行 LLM 審查 (Stage 1)...', percent: 50 },
+        { step: 4, message: '📊 正在進行歷史回測 (Stage 2)...', percent: 70 },
+        { step: 5, message: '📈 正在生成回測圖表...', percent: 90 }
+    ];
+    
+    // 自動更新進度
+    const progressInterval = setInterval(() => {
+        if (currentStep < steps.length) {
+            updateProgressUI(steps[currentStep].step, steps[currentStep].message, steps[currentStep].percent);
+            currentStep++;
+        }
+    }, 3000);
+    
+    try {
+        const response = await fetch('/api/strategies/confirm', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                symbol: document.getElementById('previewSymbol').value,
+                prompt: document.getElementById('previewPrompt').value,
+                direction: document.getElementById('previewDirection').value,
+                timeframe: document.getElementById('previewTimeframe').value,
+                stop_loss: document.getElementById('previewStopLoss').value || null,
+                take_profit: document.getElementById('previewTakeProfit').value || null,
+                quantity: parseInt(document.getElementById('previewQuantity').value) || 1
+            })
+        });
+        
+        // 清除進度計時器
+        clearInterval(progressInterval);
+        
+        const data = await response.json();
+        
+        // 顯示最終結果
+        displayResult(data);
+    } catch (error) {
+        clearInterval(progressInterval);
+        verificationContent.innerHTML = '<div class="result-error">請求失敗: ' + error.message + '</div>';
+        btn.disabled = false;
+        btn.textContent = '✅ 確認并生成策略代码';
+    }
+}
+
+function updateProgressUI(step, message, percent) {
+    const progressBar = document.getElementById('progressBar');
+    const progressMessage = document.getElementById('progressMessage');
+    
+    if (progressBar && progressMessage) {
+        progressBar.style.width = percent + '%';
+        progressMessage.textContent = message;
+        
+        // 更新步驟狀態
+        for (let i = 1; i <= 5; i++) {
+            const stepEl = document.getElementById('step' + i);
+            if (stepEl) {
+                if (i < step) {
+                    stepEl.className = 'progress-step completed';
+                } else if (i === step) {
+                    stepEl.className = 'progress-step active';
+                } else {
+                    stepEl.className = 'progress-step';
+                }
+            }
+        }
+    }
+}
+
+function displayResult(data) {
+    const btn = document.getElementById('confirmBtn');
+    btn.disabled = false;
+    btn.textContent = '✅ 確認并生成策略代码';
+    
+    const verificationContent = document.getElementById('verificationContent');
+    
+    if (data.success) {
+        let html = '<div class="result-success">';
+        html += '<h3>✅ 策略已成功创建！</h3>';
+        html += '<p><strong>策略 ID:</strong> ' + data.data.strategy_id + '</p>';
+        html += '<p><strong>策略名称:</strong> ' + data.data.name + '</p>';
+        
+        // 驗證结果
+        if (data.data.verification) {
+            // Stage 1: LLM Review
+            const stage1Class = data.data.verification.stage1_passed ? 'passed' : 'failed';
+            html += '<div class="verification-stage ' + stage1Class + '">';
+            html += '<div class="stage-status ' + stage1Class + '">Stage 1: LLM Review</div>';
+            if (!data.data.verification.stage1_passed) {
+                html += '<div>' + (data.data.verification.stage1_error || '驗證失敗') + '</div>';
+            }
+            html += '</div>';
+            
+            // Stage 2: Backtest
+            if (data.data.verification.stage1_passed) {
+                const stage2Class = data.data.verification.stage2_passed ? 'passed' : 'failed';
+                html += '<div class="verification-stage ' + stage2Class + '">';
+                html += '<div class="stage-status ' + stage2Class + '">Stage 2: Backtest</div>';
+                if (data.data.verification.stage2_passed) {
+                    // 使用 iframe 顯示完整回測 HTML 圖表
+                    if (data.data.chart_path) {
+                        html += '<iframe src="' + data.data.chart_path + '" style="width:100%; height:600px; border:none; border-radius:8px; margin-top: 8px;"></iframe>';
+                    }
+                    
+                    // 顯示策略分析
+                    if (data.data.analysis) {
+                        html += '<div style="margin-top: 12px; padding: 10px; background: #f8f9fa; border-radius: 6px; font-size: 13px;">';
+                        html += '<div style="white-space: pre-wrap; line-height: 1.4;">' + data.data.analysis + '</div>';
+                        html += '</div>';
+                    }
+                } else {
+                    html += '<div>' + (data.data.verification.stage2_error || '回测失敗') + '</div>';
+                }
+                html += '</div>';
+            }
+        }
+        
+        html += '<div style="margin-top: 16px;">';
+        html += '<a href="/strategies" class="btn btn-primary">查看策略列表</a> ';
+        html += '<a href="/strategies/create" class="btn btn-success">繼續創建</a>';
+        html += '</div>';
+        html += '</div>';
+        
+        verificationContent.innerHTML = html;
+    } else {
+        let html = '<div class="result-error">';
+        html += '<h3>❌ 策略创建失敗</h3>';
+        html += '<p>' + data.message + '</p>';
+        
+        if (data.data && data.data.verification) {
+            if (data.data.verification.stage1_passed === false) {
+                html += '<div class="verification-stage failed">';
+                html += '<div class="stage-status failed">Stage 1: LLM Review - 失敗</div>';
+                html += '<div>' + (data.data.verification.stage1_error || '驗證失敗') + '</div>';
+                html += '</div>';
+            }
+            
+            if (data.data.verification.stage1_passed && data.data.verification.stage2_passed === false) {
+                html += '<div class="verification-stage failed">';
+                html += '<div class="stage-status failed">Stage 2: Backtest - 失敗</div>';
+                html += '<div>' + (data.data.verification.stage2_error || '回测失敗') + '</div>';
+                html += '</div>';
+            }
+        }
+        
+        html += '<div style="margin-top: 16px;">';
+        html += '<button class="btn btn-primary" onclick="showInputPanel()">← 返回修改</button>';
+        html += '</div>';
+        html += '</div>';
+        
+        verificationContent.innerHTML = html;
+    }
+}
+</script>
+{% endblock %}

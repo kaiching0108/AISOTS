@@ -9,9 +9,8 @@ def get_positions():
     """取得所有部位"""
     try:
         tools = current_app.trading_tools
-        with current_app.lock:
-            positions = tools.position_mgr.get_all_positions()
-            summary = tools.position_mgr.get_positions_summary()
+        positions = tools.position_mgr.get_all_positions()
+        summary = tools.position_mgr.get_positions_summary()
         
         result = []
         for pos in positions:

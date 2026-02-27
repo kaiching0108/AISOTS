@@ -83,15 +83,16 @@ class ShioajiClient:
         Note:
             如果傳入基本代碼（TXF/MXF/TMF），會自動轉換為近月合約（TXFR1）
         """
+        # 模擬模式：直接返回模擬合約，不進行任何網路呼叫
+        if self.simulation or self.skip_login:
+            if symbol not in self._contracts_cache:
+                mock_contract = self._create_mock_contract(symbol)
+                if mock_contract:
+                    self._contracts_cache[symbol] = mock_contract
+            return self._contracts_cache.get(symbol)
+        
         if symbol in self._contracts_cache:
             return self._contracts_cache[symbol]
-        
-        # 模擬模式：建立模擬合約
-        if self.simulation or self.skip_login:
-            mock_contract = self._create_mock_contract(symbol)
-            if mock_contract:
-                self._contracts_cache[symbol] = mock_contract
-                return mock_contract
         
         try:
             # 自動轉換基本代碼為近月合約
@@ -142,6 +143,8 @@ class ShioajiClient:
                 limit_up: float
                 limit_down: float
                 margin: float
+                last_price: float = 0.0
+                reference: float = 0.0
                 
             category = symbol[:3] if len(symbol) >= 3 else symbol
             month = symbol[3:] if len(symbol) > 3 else ""

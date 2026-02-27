@@ -5,7 +5,7 @@ import requests
 from typing import Optional, Dict, Any
 from datetime import datetime
 
-from telegram import BotCommand, Update
+from telegram import BotCommand, Update, Message
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 from pathlib import Path
@@ -93,12 +93,13 @@ class TelegramNotifier:
             logger.warning("Telegram 配置不完整")
             self.enabled = False
     
-    def send_message(self, text: str, parse_mode: str = None) -> bool:
+    def send_message(self, text: str, parse_mode: str = None, max_retries: int = 3) -> bool:
         """發送訊息
         
         Args:
             text: 訊息內容（會自動清理 Markdown 格式）
             parse_mode: 解析模式，預設為 None（純文字），可選 "Markdown" 或 "HTML"
+            max_retries: 最大重試次數
         """
         if not self.enabled:
             return False
@@ -106,36 +107,39 @@ class TelegramNotifier:
         # 自動清理 Markdown 格式
         text = clean_markdown_for_telegram(text)
         
-        try:
-            url = f"{self.api_url}/sendMessage"
-            data = {
-                "chat_id": self.chat_id,
-                "text": text
-            }
-            
-            # 只有明確指定時才使用 Markdown/HTML 解析
-            if parse_mode:
-                data["parse_mode"] = parse_mode
-            
-            response = requests.post(url, json=data, timeout=10)
-            result = response.json()
-            
-            if result.get("ok"):
-                return True
-            else:
-                # 如果發送失敗且使用了 parse_mode，嘗試用純文字重發
-                if parse_mode and "parse_mode" in data:
-                    logger.warning(f"Telegram 發送失敗（{parse_mode}），嘗試純文字: {result}")
-                    data.pop("parse_mode")
-                    response = requests.post(url, json=data, timeout=10)
-                    result = response.json()
-                    return result.get("ok", False)
-                logger.error(f"Telegram 發送失敗: {result}")
-                return False
+        url = f"{self.api_url}/sendMessage"
+        data = {
+            "chat_id": self.chat_id,
+            "text": text
+        }
+        
+        # 只有明確指定時才使用 Markdown/HTML 解析
+        if parse_mode:
+            data["parse_mode"] = parse_mode
+        
+        for attempt in range(max_retries):
+            try:
+                response = requests.post(url, json=data, timeout=30)
+                result = response.json()
                 
-        except Exception as e:
-            logger.error(f"Telegram 發送錯誤: {e}")
-            return False
+                if result.get("ok"):
+                    return True
+                else:
+                    # 如果發送失敗且使用了 parse_mode，嘗試用純文字重發
+                    if parse_mode and "parse_mode" in data:
+                        logger.warning(f"Telegram 發送失敗（{parse_mode}），嘗試純文字: {result}")
+                        data.pop("parse_mode")
+                        continue
+                    logger.error(f"Telegram 發送失敗: {result}")
+                    return False
+                    
+            except Exception as e:
+                logger.warning(f"Telegram 發送錯誤 (嘗試 {attempt + 1}/{max_retries}): {e}")
+                if attempt == max_retries - 1:
+                    logger.error(f"Telegram 發送錯誤: {e}")
+                    return False
+        
+        return False
     
     def send_photo(self, photo_path: str, caption: str = None) -> bool:
         """發送圖片
@@ -368,12 +372,13 @@ class TelegramBot:
         BotCommand("new", "開始新對話"),
     ]
 
-    def __init__(self, config: dict, command_handler, clear_history_callback=None):
+    def __init__(self, config: dict, command_handler, clear_history_callback=None, notifier=None):
         self.enabled = config.get("enabled", True)
         self.bot_token = config.get("bot_token", "")
         self.chat_id = config.get("chat_id", "")
         self.command_handler = command_handler
         self.clear_history_callback = clear_history_callback
+        self.notifier = notifier
 
         self._app = None
         self._running = False
@@ -387,10 +392,17 @@ class TelegramBot:
             self.enabled = False
 
     async def start(self) -> None:
-        """啟動 Telegram Bot (Long Polling)"""
+        """啟動 Telegram Bot (Long Polling)
+        
+        當 enabled: true 時，只啟用通知功能，不接收命令
+        """
         if not self.enabled:
             logger.info("Telegram Bot 未啟用")
             return
+
+        # Telegram Bot 現在只作為通知用途，不接收命令
+        logger.info("Telegram Bot 已啟用為通知模式，不接收命令")
+        return
 
         logger.info("正在啟動 Telegram Bot...")
 
@@ -556,14 +568,72 @@ class TelegramBot:
         logger.info(f"收到命令: {user_text}")
 
         try:
-            result = await self.command_handler(user_text)
-            # 清理 Markdown 格式後發送
-            cleaned_result = clean_markdown_for_telegram(result)
-            await message.reply_text(cleaned_result, parse_mode=None)
+            command_lower = user_text.strip().lower()
+            creation_keywords = ["設計", "建立", "創建", "design", "create", "幫我設計", "幫我建立", "我想設計", "我想建立"]
+            is_creation = any(kw in command_lower for kw in creation_keywords)
+            
+            confirm_keywords = ["確認", "确定", "yes", "確定", "confirm", "ok", "好", "好啦", "okay"]
+            is_confirm = any(kw in command_lower for kw in confirm_keywords)
+
+            if is_creation:
+                await message.reply_text("🧠 收到您的請求，正在設計策略...\n⏳ 這可能需要 20-40 秒，請稍候")
+                asyncio.create_task(self._handle_long_command(user_text, message))
+            elif is_confirm:
+                await message.reply_text("✅ 收到確認，正在建立策略...\n\n📋 流程：\n1. LLM 生成策略程式碼\n2. 自動驗證（最多 3 次）\n3. 歷史回測\n\n⏳ 這可能需要 30-90 秒，請稍候")
+                asyncio.create_task(self._handle_confirmation(message))
+            else:
+                result = await self.command_handler(user_text)
+                cleaned_result = clean_markdown_for_telegram(result)
+                await message.reply_text(cleaned_result, parse_mode=None)
+        except asyncio.TimeoutError:
+            logger.error(f"處理命令超時: {user_text[:50]}")
+            await message.reply_text("⏱️ 命令執行超時，請重新發送一次", parse_mode=None)
         except Exception as e:
-            logger.error(f"處理命令失敗: {e}")
+            error_str = str(e).lower()
+            if "timeout" in error_str or "timed out" in error_str:
+                logger.error(f"處理命令超時: {e}")
+                await message.reply_text("⏱️ 命令執行超時，請重新發送一次", parse_mode=None)
+            else:
+                logger.error(f"處理命令失敗: {e}")
+                error_msg = clean_markdown_for_telegram(f"❌ 處理命令時發生錯誤: {e}")
+                await message.reply_text(error_msg, parse_mode=None)
+
+    async def _handle_long_command(self, user_text: str, message: Message) -> None:
+        """處理需要長時間的命令"""
+        import traceback
+        try:
+            await asyncio.sleep(1)
+            result = await self.command_handler(user_text)
+            cleaned_result = clean_markdown_for_telegram(result)
+            if self.notifier:
+                self.notifier.send_message(cleaned_result)
+        except Exception as e:
+            logger.error(f"處理長時間命令失敗: {type(e).__name__}: {e}")
+            logger.error(traceback.format_exc())
             error_msg = clean_markdown_for_telegram(f"❌ 處理命令時發生錯誤: {e}")
-            await message.reply_text(error_msg, parse_mode=None)
+            try:
+                if self.notifier:
+                    self.notifier.send_message(error_msg)
+            except Exception:
+                pass
+
+    async def _handle_confirmation(self, message: Message) -> None:
+        """處理策略確認（建立策略並驗證）"""
+        import traceback
+        try:
+            result = await self.command_handler("確認")
+            cleaned_result = clean_markdown_for_telegram(result)
+            if self.notifier:
+                self.notifier.send_message(cleaned_result)
+        except Exception as e:
+            logger.error(f"處理確認命令失敗: {type(e).__name__}: {e}")
+            logger.error(traceback.format_exc())
+            error_msg = clean_markdown_for_telegram(f"❌ 建立策略時發生錯誤: {e}")
+            try:
+                if self.notifier:
+                    self.notifier.send_message(error_msg)
+            except Exception:
+                pass
 
     async def _on_error(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         """處理錯誤"""

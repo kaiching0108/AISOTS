@@ -33,8 +33,20 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
+    // 定义 REFRESH_INTERVAL（防止 base.html 未加载）
+    if (typeof REFRESH_INTERVAL === 'undefined') {
+        const REFRESH_INTERVAL = 30000;
+    }
+    
+    // 测试：立即执行
+    window.onerror = function(msg, url, line, col, error) {
+        console.error('Global error:', msg, 'at line', line);
+    };
+    
+    console.log('Script starting...');
+    
     async function loadSystemStatus() {
+        console.log('loadSystemStatus called');
         try {
             const [statusRes, strategiesRes, positionsRes, riskRes] = await Promise.all([
                 fetch('/api/status'),
@@ -66,7 +78,7 @@
                         <div style="color: #666; font-size: 12px;">部位口數</div>
                     </div>
                     <div>
-                        <div style="font-size: 24px; font-weight: bold; class="${positionsData.summary?.total_pnl >= 0 ? 'pnl-positive' : 'pnl-negative'}">
+                        <div style="font-size: 24px; font-weight: bold;">
                             ${(positionsData.summary?.total_pnl || 0).toLocaleString()}
                         </div>
                         <div style="color: #666; font-size: 12px;">當日損益</div>
@@ -120,9 +132,24 @@
                     </div>
                 </div>
             `;
+            
+            // Debug: test fetch
+            fetch('/api/status')
+                .then(r => r.json())
+                .then(data => {
+                    console.log('Fetch success:', data);
+                    document.getElementById('systemStatus').innerHTML = '<div class="empty-state">API 正常: ' + JSON.stringify(data).substring(0, 100) + '</div>';
+                })
+                .catch(err => {
+                    console.error('Fetch error:', err);
+                    document.getElementById('systemStatus').innerHTML = '<div class="empty-state">Fetch 失敗: ' + err.message + '</div>';
+                });
         } catch (e) {
-            console.error(e);
-            document.getElementById('systemStatus').innerHTML = '<div class="empty-state">載入失敗</div>';
+            console.error('Error loading system status:', e);
+            document.getElementById('systemStatus').innerHTML = '<div class="empty-state">載入失敗: ' + e.message + '</div>';
+            document.getElementById('strategyOverview').innerHTML = '<div class="empty-state">載入失敗</div>';
+            document.getElementById('positionOverview').innerHTML = '<div class="empty-state">載入失敗</div>';
+            document.getElementById('riskStatus').innerHTML = '<div class="empty-state">載入失敗</div>';
         }
     }
     

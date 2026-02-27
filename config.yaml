@@ -1,67 +1,34 @@
-# AI 期貨交易系統配置
-
-# Shioaji API 配置
-shioaji:
-  api_key: "YOUR_API_KEY"
-  secret_key: "YOUR_SECRET_KEY"
-  simulation: true  # 測試模式，實盤改為 false
-
-# LLM 配置
-llm:
-  provider: "custom"           # openrouter, openai, anthropic, deepseek, custom
-  api_key: ""                 # 自定義端點或本地端可設為空
-  model: "llama3"             # 模型名稱
-  temperature: 0.7
-  max_tokens: 2000
-  base_url: "http://localhost:11434/v1"  # Ollama 預設位址
-
-# Telegram 通知配置
-telegram:
-  enabled: true
-  bot_token: "YOUR_BOT_TOKEN"
-  chat_id: "YOUR_CHAT_ID"
-
-# 風控配置
-risk:
-  max_daily_loss: 50000          # 單日最大虧損 (元)
-  max_position: 10               # 最大口數總和
-  max_orders_per_minute: 5       # 每分鐘最大下單數
-  enable_stop_loss: true         # 啟用停損
-  enable_take_profit: true       # 啟用止盈
-
-# 交易配置
-trading:
-  check_interval: 60             # 檢查間隔 (秒)
-  trading_hours:
-    day_start: "08:45"
-    day_end: "13:45"
-    night_start: "15:00"
-    night_end: "05:00"
-
-# 自動 LLM Review 排程
-# 說明：
-# - enabled: 是否啟用自動 review
-# - schedules: 排程列表
-#   - strategy_id: 策略 ID
-#   - period: 週期數字
-#   - unit: 單位 (day/week/month/quarter/year)
-# - 沒有設定 goal 的策略會跳過不觸發
-# - 排程觸發每天最多 1 次，手動執行 review 不受限制
 auto_review:
   enabled: false
-  # schedules:
-  #   - strategy_id: "strategy_001"
-  #     period: 5
-  #     unit: "day"      # 每 5 天觸發一次
-  #   - strategy_id: "strategy_002"
-  #     period: 2
-  #     unit: "week"     # 每 2 週觸發一次
-  #   - strategy_id: "strategy_003"
-  #     period: 1
-  #     unit: "month"    # 每月觸發一次
-
-# Web 界面配置
+llm:
+  api_key: 
+  base_url: 
+  max_tokens: 2000
+  model: minimax-m2.5
+  provider: custom
+  temperature: 0.7
+risk:
+  enable_stop_loss: true
+  enable_take_profit: true
+  max_daily_loss: 10000
+  max_orders_per_minute: 1
+  max_position: 3
+shioaji:
+  api_key:
+  secret_key: 
+  simulation: true
+telegram:
+  bot_token: 
+  chat_id: ''
+  enabled: false
+trading:
+  check_interval: 60
+  trading_hours:
+    day_end: '13:45'
+    day_start: 08:45
+    night_end: 05:00
+    night_start: '15:00'
 web:
-  enabled: false          # 是否啟用 Web 界面
-  host: "127.0.0.1"     # 綁定位址（本機）
-  port: 5000            # 連接埠
+  enabled: true
+  host: 127.0.0.1
+  port: 5001

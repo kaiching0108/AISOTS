@@ -10,7 +10,9 @@ class Strategy:
     
     def __init__(self, strategy_id: str, name: str, symbol: str, prompt: str, 
                  params: Dict[str, Any], enabled: bool = False,
-                 goal: Optional[float] = None, goal_unit: str = "daily"):
+                 goal: Optional[float] = None, goal_unit: str = "daily",
+                 review_period: int = 5, review_unit: str = "day",
+                 direction: str = "long"):
         self.id = strategy_id
         self.name = name
         self.symbol = symbol
@@ -19,9 +21,16 @@ class Strategy:
         self.enabled = enabled
         self.created_at = datetime.now().isoformat()
         
+        # 交易方向：long(做多), short(做空), both(多空都做)
+        self.direction = direction
+        
         # 目標設定
         self.goal: Optional[float] = goal
         self.goal_unit: Optional[str] = goal_unit
+        
+        # 自動 LLM Review 週期（天/週/月）
+        self.review_period: int = review_period
+        self.review_unit: str = review_unit
         
         # 執行狀態
         self.last_signal: Optional[str] = None
@@ -54,10 +63,13 @@ class Strategy:
             "symbol": self.symbol,
             "prompt": self.prompt,
             "enabled": self.enabled,
+            "direction": self.direction,
             "params": self.params,
             "created_at": self.created_at,
             "goal": self.goal,
             "goal_unit": self.goal_unit,
+            "review_period": self.review_period,
+            "review_unit": self.review_unit,
             "last_signal": self.last_signal,
             "last_signal_time": self.last_signal_time,
             "rules": self.rules,
@@ -90,6 +102,8 @@ class Strategy:
         strategy.created_at = data.get("created_at", strategy.created_at)
         strategy.goal = data.get("goal")
         strategy.goal_unit = data.get("goal_unit", "daily")
+        strategy.review_period = data.get("review_period", 5)
+        strategy.review_unit = data.get("review_unit", "day")
         strategy.last_signal = data.get("last_signal")
         strategy.last_signal_time = data.get("last_signal_time")
         strategy.rules = data.get("rules")

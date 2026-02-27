@@ -4,7 +4,7 @@
 
 ## Overview
 
-This is an AI-powered futures trading system using Shioaji API (Taiwan Futures Exchange), with support for multiple trading strategies, risk management, Telegram notifications, and LLM-based strategy generation.
+This is an AI-powered futures trading system using Shioaji API (Taiwan Futures Exchange), with support for multiple trading strategies, risk management, **Web Interface (primary)** for user interaction, and **Telegram notifications** for alerts.
 
 ## Project Structure
 
@@ -748,27 +748,33 @@ if rsi is None:
 rsi_value = rsi.iloc[-1]
 ```
 
-### Telegram Bot
+### Telegram Notifications
 
-The system includes a Telegram bot for receiving user commands:
+The system includes Telegram notifications for alerts and updates. The bot **only sends notifications** and does **not receive commands** - all user interaction happens through the Web Interface.
 
 ```python
 from src.notify import TelegramBot
 
-# Initialize with config and command handler
+# Initialize with config (bot only sends, does not receive commands)
 bot = TelegramBot(
-    config={"bot_token": "...", "chat_id": "..."},
-    command_handler=llm_process_command
+    config={"bot_token": "...", "chat_id": "..."}
 )
 
-# Start bot
+# Start bot for notifications
 await bot.start()
 
 # Stop bot
 await bot.stop()
 ```
 
-The bot supports commands: `/start`, `/help`, `/new`, and text messages forwarded to the LLM.
+**Notification types**:
+- Strategy enabled/disabled confirmations
+- Risk warnings
+- Order execution alerts
+- Performance reports
+- System status updates
+
+**Note**: Telegram bot does NOT accept commands. Use the Web Interface (http://127.0.0.1:5001) for all operations.
 
 ### Goal-Driven Strategy Creation
 
@@ -813,7 +819,7 @@ The system uses `loguru` for logging (configured in `src/logger.py`):
 The system maintains conversation history for better LLM context:
 
 - Maximum 20 messages stored
-- Cleared via Telegram `/new` command
+- Cleared via Web Interface "New Conversation" button or system restart
 - Used in `llm_process_command()` to provide context
 
 ### Delete Strategy
@@ -910,11 +916,16 @@ if new_cmd_match:
 
 ---
 
-## Web Interface
+## Web Interface (Primary)
 
 ### Overview
 
-The system includes a Web Interface for graphical management of strategies and positions through a web browser.
+The **Web Interface is the primary user interaction platform** for managing strategies and positions. All operations including strategy creation, enabling/disabling, backtesting, and position monitoring are done through the web browser.
+
+**Key Points**:
+- **Primary Interface**: Web Interface is the main way to interact with the system
+- **Telegram**: Only used for notifications, not for commands
+- **URL**: `http://127.0.0.1:5001` (port may vary based on configuration)
 
 ### Startup
 
@@ -971,7 +982,6 @@ When disabling/deleting a strategy with positions, the API returns modal confirm
 
 ### Design Principles
 
-- **Thread Safety**: Uses `threading.Lock` to protect shared state
 - **Error Isolation**: Web errors don't affect the main trading system
 - **Config-Driven**: Enabled via `config.yaml`
 

@@ -75,7 +75,8 @@ class AITradingSystem:
         self.telegram_bot = TelegramBot(
             config=self.config.telegram.model_dump(),
             command_handler=self.llm_process_command,
-            clear_history_callback=self.clear_conversation_history
+            clear_history_callback=self.clear_conversation_history,
+            notifier=self.notifier
         )
         
         # LLM Provider (lazy loading)
@@ -915,7 +916,7 @@ async def main():
         import threading
         from src.web.app import create_web_app
         
-        web_app = create_web_app(system.trading_tools)
+        web_app = create_web_app(system.trading_tools, system.llm_provider)
         web_thread = threading.Thread(
             target=web_app.run,
             kwargs={

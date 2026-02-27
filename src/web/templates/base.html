@@ -281,8 +281,10 @@
         <div class="navbar-brand">AISOTS Web Dashboard</div>
         <div class="navbar-menu">
             <a href="/">系統總覽</a>
+            <a href="/strategies/create">創建策略</a>
             <a href="/strategies">策略管理</a>
             <a href="/positions">部位查詢</a>
+            <a href="/config">系統配置</a>
         </div>
     </nav>
     
@@ -310,10 +312,83 @@
         <div class="modal-content" style="max-width: 800px; max-height: 90vh;">
             <div class="modal-header" id="codeModalTitle">📄 策略程式碼</div>
             <div class="modal-body" style="overflow: auto; max-height: 70vh;">
+                <div id="codePrompt" style="margin-bottom: 15px; padding: 10px; background: #f5f5f5; border-left: 3px solid #2196F3; font-size: 14px;"></div>
                 <pre><code id="codeContent" class="language-python"></code></pre>
             </div>
             <div class="modal-footer">
                 <button class="btn" onclick="closeCodeModal()">關閉</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Goal Setting Modal -->
+    <div id="goalModal" class="modal">
+        <div class="modal-content" style="max-width: 400px;">
+            <div class="modal-header">🎯 設定策略目標</div>
+            <div class="modal-body">
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 5px; font-weight: bold;">目標金額（元）:</label>
+                    <input type="number" id="goalAmount" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" placeholder="例如: 500">
+                    <small style="color: #666; display: block; margin-top: 3px;">留空表示移除目標</small>
+                </div>
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 5px; font-weight: bold;">目標單位:</label>
+                    <select id="goalUnit" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        <option value="daily">每日</option>
+                        <option value="weekly">每週</option>
+                        <option value="monthly">每月</option>
+                    </select>
+                </div>
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 5px; font-weight: bold;">自動 Review 週期:</label>
+                    <input type="number" id="reviewPeriod" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" value="5" min="1">
+                </div>
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 5px; font-weight: bold;">自動 Review 單位:</label>
+                    <select id="reviewUnit" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        <option value="day">天</option>
+                        <option value="week">週</option>
+                        <option value="month">月</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeGoalModal()">取消</button>
+                <button class="btn btn-primary" id="goalConfirmBtn">確認</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Simple Confirm Modal -->
+    <div id="simpleConfirmModal" class="modal">
+        <div class="modal-content" style="max-width: 400px;">
+            <div class="modal-header" id="simpleConfirmTitle">⚠️ 確認操作</div>
+            <div class="modal-body">
+                <div id="simpleConfirmMessage"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeSimpleConfirmModal()">取消</button>
+                <button class="btn btn-danger" id="simpleConfirmBtn">確認</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Backtest Result Modal -->
+    <div id="backtestResultModal" class="modal">
+        <div class="modal-content" style="max-width: 900px; max-height: 90vh;">
+            <div class="modal-header" id="backtestResultTitle">📊 回測結果</div>
+            <div class="modal-body" style="overflow: auto; max-height: 70vh;">
+                <div id="backtestLoading" style="text-align: center; padding: 40px;">
+                    <div style="font-size: 24px; margin-bottom: 15px;">⏳</div>
+                    <div>正在執行回測，請稍候...</div>
+                </div>
+                <div id="backtestContent" style="display: none;">
+                    <iframe id="backtestChart" style="width: 100%; height: 500px; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 15px;"></iframe>
+                    <pre id="backtestReport" style="background: #f5f5f5; padding: 15px; border-radius: 4px; overflow: auto; max-height: 300px; font-size: 13px;"></pre>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeBacktestResultModal()">關閉</button>
             </div>
         </div>
     </div>
@@ -358,29 +433,190 @@
             return await response.json();
         }
         
-        // Close modal on outside click
-        document.getElementById('confirmModal').addEventListener('click', function(e) {
-            if (e.target === this) {
-                closeModal();
-            }
-        });
+        // Close modal on outside click (check element exists first)
+        var confirmModalEl = document.getElementById('confirmModal');
+        if (confirmModalEl) {
+            confirmModalEl.addEventListener('click', function(e) {
+                if (e.target === this) {
+                    closeModal();
+                }
+            });
+        }
         
         // Code modal functions
-        function showCodeModal(title, code) {
-            document.getElementById('codeModalTitle').textContent = '📄 ' + title;
-            document.getElementById('codeContent').textContent = code || '(無程式碼)';
-            document.getElementById('codeModal').classList.add('active');
+        function showCodeModal(title, code, prompt) {
+            var codeModalEl = document.getElementById('codeModal');
+            var codeContentEl = document.getElementById('codeContent');
+            var codePromptEl = document.getElementById('codePrompt');
+            if (codeModalEl && codeContentEl) {
+                document.getElementById('codeModalTitle').textContent = '📄 ' + title;
+                document.getElementById('codeContent').textContent = code || '(無程式碼)';
+                
+                // 显示 prompt
+                if (codePromptEl) {
+                    if (prompt) {
+                        codePromptEl.innerHTML = '<strong>策略描述：</strong><br>' + prompt.replace(/\n/g, '<br>');
+                        codePromptEl.style.display = 'block';
+                    } else {
+                        codePromptEl.style.display = 'none';
+                    }
+                }
+                
+                document.getElementById('codeModal').classList.add('active');
+            }
         }
         
         function closeCodeModal() {
-            document.getElementById('codeModal').classList.remove('active');
+            var codeModalEl = document.getElementById('codeModal');
+            var codeContentEl = document.getElementById('codeContent');
+            var codePromptEl = document.getElementById('codePrompt');
+            
+            if (codeModalEl) {
+                codeModalEl.classList.remove('active');
+            }
+            
+            // 使用 requestAnimationFrame 優化性能，清空內容減少記憶體佔用
+            requestAnimationFrame(function() {
+                if (codeContentEl) codeContentEl.textContent = '';
+                if (codePromptEl) {
+                    codePromptEl.innerHTML = '';
+                    codePromptEl.style.display = 'none';
+                }
+            });
         }
         
-        document.getElementById('codeModal').addEventListener('click', function(e) {
-            if (e.target === this) {
-                closeCodeModal();
+        var codeModalEl2 = document.getElementById('codeModal');
+        if (codeModalEl2) {
+            codeModalEl2.addEventListener('click', function(e) {
+                if (e.target === this) {
+                    closeCodeModal();
+                }
+            });
+        }
+        
+        // Goal modal functions
+        var currentGoalCallback = null;
+        
+        function showGoalModal(currentGoal, currentGoalUnit, currentReviewPeriod, currentReviewUnit, confirmCallback) {
+            document.getElementById('goalAmount').value = currentGoal || '';
+            document.getElementById('goalUnit').value = currentGoalUnit || 'daily';
+            document.getElementById('reviewPeriod').value = currentReviewPeriod || 5;
+            document.getElementById('reviewUnit').value = currentReviewUnit || 'day';
+            
+            currentGoalCallback = confirmCallback;
+            document.getElementById('goalConfirmBtn').onclick = function() {
+                const goal = document.getElementById('goalAmount').value;
+                const goalUnit = document.getElementById('goalUnit').value;
+                const reviewPeriod = document.getElementById('reviewPeriod').value;
+                const reviewUnit = document.getElementById('reviewUnit').value;
+                
+                if (currentGoalCallback) {
+                    currentGoalCallback({
+                        goal: goal ? parseFloat(goal) : null,
+                        goalUnit: goalUnit,
+                        reviewPeriod: parseInt(reviewPeriod) || 5,
+                        reviewUnit: reviewUnit
+                    });
+                }
+                closeGoalModal();
+            };
+            
+            document.getElementById('goalModal').classList.add('active');
+        }
+        
+        function closeGoalModal() {
+            document.getElementById('goalModal').classList.remove('active');
+            currentGoalCallback = null;
+        }
+        
+        var goalModalEl = document.getElementById('goalModal');
+        if (goalModalEl) {
+            goalModalEl.addEventListener('click', function(e) {
+                if (e.target === this) {
+                    closeGoalModal();
+                }
+            });
+        }
+        
+        // Simple Confirm Modal functions
+        var currentSimpleConfirmCallback = null;
+        
+        function showSimpleConfirmModal(title, message, confirmCallback) {
+            document.getElementById('simpleConfirmTitle').textContent = '⚠️ ' + title;
+            document.getElementById('simpleConfirmMessage').textContent = message;
+            
+            currentSimpleConfirmCallback = confirmCallback;
+            document.getElementById('simpleConfirmBtn').onclick = function() {
+                if (currentSimpleConfirmCallback) {
+                    currentSimpleConfirmCallback();
+                }
+                closeSimpleConfirmModal();
+            };
+            
+            document.getElementById('simpleConfirmModal').classList.add('active');
+        }
+        
+        function closeSimpleConfirmModal() {
+            document.getElementById('simpleConfirmModal').classList.remove('active');
+            currentSimpleConfirmCallback = null;
+        }
+        
+        var simpleConfirmModalEl = document.getElementById('simpleConfirmModal');
+        if (simpleConfirmModalEl) {
+            simpleConfirmModalEl.addEventListener('click', function(e) {
+                if (e.target === this) {
+                    closeSimpleConfirmModal();
+                }
+            });
+        }
+        
+        // Backtest Result Modal functions
+        function showBacktestResultModal(title) {
+            document.getElementById('backtestResultTitle').textContent = '📊 ' + title;
+            document.getElementById('backtestLoading').style.display = 'block';
+            document.getElementById('backtestContent').style.display = 'none';
+            document.getElementById('backtestChart').src = '';
+            document.getElementById('backtestReport').textContent = '';
+            document.getElementById('backtestResultModal').classList.add('active');
+        }
+        
+        function updateBacktestResult(chartPath, report) {
+            document.getElementById('backtestLoading').style.display = 'none';
+            document.getElementById('backtestContent').style.display = 'block';
+            
+            if (chartPath) {
+                document.getElementById('backtestChart').src = chartPath;
+                document.getElementById('backtestChart').style.display = 'block';
+            } else {
+                document.getElementById('backtestChart').style.display = 'none';
             }
-        });
+            
+            const reportEl = document.getElementById('backtestReport');
+            reportEl.textContent = report || '(無報告)';
+            reportEl.style.color = '#333';  // 設置深色文字，確保可見
+        }
+        
+        function showBacktestError(errorMessage) {
+            document.getElementById('backtestLoading').style.display = 'none';
+            document.getElementById('backtestContent').style.display = 'block';
+            document.getElementById('backtestChart').style.display = 'none';
+            document.getElementById('backtestReport').textContent = '❌ 回測失敗: ' + errorMessage;
+            document.getElementById('backtestReport').style.color = '#e74c3c';
+        }
+        
+        function closeBacktestResultModal() {
+            document.getElementById('backtestResultModal').classList.remove('active');
+            document.getElementById('backtestChart').src = '';
+        }
+        
+        var backtestResultModalEl = document.getElementById('backtestResultModal');
+        if (backtestResultModalEl) {
+            backtestResultModalEl.addEventListener('click', function(e) {
+                if (e.target === this) {
+                    closeBacktestResultModal();
+                }
+            });
+        }
         
         {% block extra_js %}{% endblock %}
     </script>

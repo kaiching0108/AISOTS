@@ -301,7 +301,7 @@ if command_stripped in ["positions", "部位", "持倉"]:
 當 LLM 策略生成失敗時：
 1. 系統記錄錯誤日誌
 2. 策略不會執行
-3. 發送 Telegram 通知給用戶
+3. 發送通知給用戶（透過 Telegram）
 4. 用戶可修改策略描述後重新嘗試
 
 ---
@@ -327,7 +327,9 @@ if command_stripped in ["positions", "部位", "持倉"]:
 | 重連失敗 | 持續嘗試並通知 |
 | API 逾時 | 回傳錯誤，不阻斷系統 |
 
-### 3.3 Telegram 回報
+### 3.3 通知系統
+
+> **注意**：系統已改為 Web Interface 為主要操作介面。Telegram 機器人僅用於通知，不接受指令。
 
 | 事件類型 | 通知內容 |
 |----------|----------|
@@ -559,11 +561,13 @@ workspace/
 
 ---
 
-## 10. Telegram Markdown 清理機制
+## 10. 通知格式化機制
+
+> **注意**：Telegram 機器人僅用於通知，不接受指令。
 
 ### 10.1 功能說明
 
-系統在發送訊息到 Telegram 之前，會自動清理 Markdown 格式，確保訊息正確顯示。
+系統在發送通知到 Telegram 之前，會自動清理 Markdown 格式，確保訊息正確顯示。
 
 ### 10.2 處理項目
 
@@ -582,10 +586,8 @@ workspace/
 
 | 位置 | 說明 |
 |------|------|
-| `TelegramNotifier.send_message()` | 發送訊息前 |
+| `TelegramNotifier.send_message()` | 發送通知前 |
 | `TelegramNotifier.send_photo()` | 發送圖片說明前 |
-| `TradingTools._clean_markdown_for_telegram()` | 工具回傳結果前 |
-| `llm_process_command()` | 處理命令錯誤時 |
 
 ---
 
@@ -1163,4 +1165,5 @@ auto_review:
 | 3.4.0 | 2026-02 | 新增版本化訊號儲存，策略更新時自動遞增版本 |
 | 3.5.0 | 2026-02 | 重構儲存系統，採用 per-strategy 結構 |
 | 3.6.0 | 2026-02 | 新增 Fallback 命令處理機制，確保基本命令執行成功 |
-| 3.7.0 | 2026-02 | 新增 Markdown 清理機制與直接處理輸入優化（確認關鍵詞、期貨代碼） |
+| 3.7.0 | 2026-02 | 新增 Markdown 清理機制優化（確認與直接處理輸入關鍵詞、期貨代碼） |
+| 4.0.0 | 2026-02 | **架構變更**：Web Interface 改為主要操作介面，Telegram 僅用於通知 |

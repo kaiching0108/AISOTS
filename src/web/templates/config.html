@@ -1,0 +1,407 @@
+{% extends "base.html" %}
+
+{% block title %}系統配置 - AISOTS{% endblock %}
+
+{% block extra_css %}
+<style>
+    .config-section {
+        background: white;
+        border-radius: 8px;
+        padding: 20px;
+        margin-bottom: 20px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    .config-section h3 {
+        color: #2c3e50;
+        margin-bottom: 15px;
+        padding-bottom: 10px;
+        border-bottom: 2px solid #3498db;
+    }
+    
+    .form-group {
+        margin-bottom: 15px;
+    }
+    
+    .form-group label {
+        display: block;
+        margin-bottom: 5px;
+        font-weight: 500;
+        color: #555;
+    }
+    
+    .form-group input,
+    .form-group select {
+        width: 100%;
+        padding: 10px;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+        font-size: 14px;
+    }
+    
+    .form-group input:focus,
+    .form-group select:focus {
+        outline: none;
+        border-color: #3498db;
+    }
+    
+    .form-group .hint {
+        font-size: 12px;
+        color: #888;
+        margin-top: 3px;
+    }
+    
+    .checkbox-group {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+    
+    .checkbox-group input[type="checkbox"] {
+        width: auto;
+    }
+    
+    .row {
+        display: flex;
+        gap: 15px;
+    }
+    
+    .row .form-group {
+        flex: 1;
+    }
+    
+    .btn-save {
+        background: #27ae60;
+        color: white;
+        border: none;
+        padding: 12px 30px;
+        border-radius: 5px;
+        cursor: pointer;
+        font-size: 16px;
+        margin-top: 20px;
+    }
+    
+    .btn-save:hover {
+        background: #219a52;
+    }
+    
+    .btn-save:disabled {
+        background: #95a5a6;
+        cursor: not-allowed;
+    }
+    
+    .alert {
+        padding: 15px;
+        border-radius: 5px;
+        margin-bottom: 20px;
+    }
+    
+    .alert-success {
+        background: #d4edda;
+        color: #155724;
+        border: 1px solid #c3e6cb;
+    }
+    
+    .alert-error {
+        background: #f8d7da;
+        color: #721c24;
+        border: 1px solid #f5c6cb;
+    }
+    
+    .loading {
+        text-align: center;
+        padding: 40px;
+        color: #888;
+    }
+    
+    .sensitive-field {
+        background: #fffde7;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h1 style="margin-bottom: 20px;">系統配置</h1>
+    
+    <div id="alert-container"></div>
+    <div id="save-alert"></div>
+    
+    <div id="config-form" class="loading">載入中...</div>
+</div>
+
+<script>
+let configData = {};
+
+async function loadConfig() {
+    try {
+        const response = await fetch('/api/config');
+        const result = await response.json();
+        
+        if (result.success) {
+            configData = result.data;
+            renderForm(result.data);
+        } else {
+            showAlert('載入配置失敗: ' + result.error, 'error');
+        }
+    } catch (error) {
+        showAlert('載入配置失敗: ' + error.message, 'error');
+    }
+}
+
+function renderForm(data) {
+    const container = document.getElementById('config-form');
+    container.className = '';
+    container.innerHTML = `
+        <form id="configForm">
+            <!-- Shioaji 配置 -->
+            <div class="config-section">
+                <h3>Shioaji API</h3>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="shioaji_simulation" ${data.shioaji.simulation ? 'checked' : ''}>
+                    <label for="shioaji_simulation">模擬模式 (測試用)</label>
+                </div>
+                <div class="form-group" style="margin-top: 15px;">
+                    <label>API Key</label>
+                    <input type="password" id="shioaji_api_key" class="sensitive-field" placeholder="留空保持原值">
+                    <div class="hint">目前: ${data.shioaji.api_key} | 留空保持原值</div>
+                </div>
+                <div class="form-group">
+                    <label>Secret Key</label>
+                    <input type="password" id="shioaji_secret_key" class="sensitive-field" placeholder="留空保持原值">
+                    <div class="hint">目前: ${data.shioaji.secret_key} | 留空保持原值</div>
+                </div>
+            </div>
+            
+            <!-- LLM 配置 -->
+            <div class="config-section">
+                <h3>LLM 配置</h3>
+                <div class="row">
+                    <div class="form-group">
+                        <label>Provider</label>
+                        <select id="llm_provider">
+                            <option value="openrouter" ${data.llm.provider === 'openrouter' ? 'selected' : ''}>OpenRouter</option>
+                            <option value="openai" ${data.llm.provider === 'openai' ? 'selected' : ''}>OpenAI</option>
+                            <option value="anthropic" ${data.llm.provider === 'anthropic' ? 'selected' : ''}>Anthropic</option>
+                            <option value="deepseek" ${data.llm.provider === 'deepseek' ? 'selected' : ''}>DeepSeek</option>
+                            <option value="custom" ${data.llm.provider === 'custom' ? 'selected' : ''}>Custom</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Model</label>
+                        <input type="text" id="llm_model" value="${data.llm.model}">
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="form-group">
+                        <label>Temperature</label>
+                        <input type="number" id="llm_temperature" step="0.1" min="0" max="2" value="${data.llm.temperature}">
+                    </div>
+                    <div class="form-group">
+                        <label>Max Tokens</label>
+                        <input type="number" id="llm_max_tokens" min="100" max="10000" value="${data.llm.max_tokens}">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Base URL</label>
+                    <input type="text" id="llm_base_url" value="${data.llm.base_url || ''}" placeholder="如: https://opencode.ai/zen/v1">
+                </div>
+                <div class="form-group">
+                    <label>API Key</label>
+                    <input type="password" id="llm_api_key" class="sensitive-field" placeholder="留空保持原值">
+                    <div class="hint">目前: ${data.llm.api_key} | 留空保持原值</div>
+                </div>
+            </div>
+            
+            <!-- Telegram 配置 -->
+            <div class="config-section">
+                <h3>Telegram 通知</h3>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="telegram_enabled" ${data.telegram.enabled ? 'checked' : ''}>
+                    <label for="telegram_enabled">啟用 Telegram 通知</label>
+                </div>
+                <div class="form-group" style="margin-top: 15px;">
+                    <label>Bot Token</label>
+                    <input type="password" id="telegram_bot_token" class="sensitive-field" placeholder="留空保持原值">
+                    <div class="hint">目前: ${data.telegram.bot_token} | 留空保持原值</div>
+                </div>
+                <div class="form-group">
+                    <label>Chat ID</label>
+                    <input type="text" id="telegram_chat_id" value="${data.telegram.chat_id || ''}">
+                </div>
+            </div>
+            
+            <!-- 風控配置 -->
+            <div class="config-section">
+                <h3>風控配置</h3>
+                <div class="row">
+                    <div class="form-group">
+                        <label>單日最大虧損 (元)</label>
+                        <input type="number" id="risk_max_daily_loss" value="${data.risk.max_daily_loss}">
+                    </div>
+                    <div class="form-group">
+                        <label>最大口數</label>
+                        <input type="number" id="risk_max_position" value="${data.risk.max_position}">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>每分鐘最大下單數</label>
+                    <input type="number" id="risk_max_orders_per_minute" value="${data.risk.max_orders_per_minute}">
+                </div>
+                <div class="row">
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="risk_enable_stop_loss" ${data.risk.enable_stop_loss ? 'checked' : ''}>
+                        <label for="risk_enable_stop_loss">啟用停損</label>
+                    </div>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="risk_enable_take_profit" ${data.risk.enable_take_profit ? 'checked' : ''}>
+                        <label for="risk_enable_take_profit">啟用止盈</label>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 交易配置 -->
+            <div class="config-section">
+                <h3>交易配置</h3>
+                <div class="form-group">
+                    <label>檢查間隔 (秒)</label>
+                    <input type="number" id="trading_check_interval" value="${data.trading.check_interval}" min="10" max="300">
+                </div>
+                <div class="row">
+                    <div class="form-group">
+                        <label>日盤開始時間</label>
+                        <input type="time" id="trading_day_start" value="${data.trading.trading_hours.day_start}">
+                    </div>
+                    <div class="form-group">
+                        <label>日盤結束時間</label>
+                        <input type="time" id="trading_day_end" value="${data.trading.trading_hours.day_end}">
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="form-group">
+                        <label>夜盤開始時間</label>
+                        <input type="time" id="trading_night_start" value="${data.trading.trading_hours.night_start}">
+                    </div>
+                    <div class="form-group">
+                        <label>夜盤結束時間</label>
+                        <input type="time" id="trading_night_end" value="${data.trading.trading_hours.night_end}">
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Web 配置 -->
+            <div class="config-section">
+                <h3>Web 界面配置</h3>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="web_enabled" ${data.web.enabled ? 'checked' : ''}>
+                    <label for="web_enabled">啟用 Web 界面</label>
+                </div>
+                <div class="row" style="margin-top: 15px;">
+                    <div class="form-group">
+                        <label>Host</label>
+                        <input type="text" id="web_host" value="${data.web.host}">
+                    </div>
+                    <div class="form-group">
+                        <label>Port</label>
+                        <input type="number" id="web_port" value="${data.web.port}" min="1024" max="65535">
+                    </div>
+                </div>
+            </div>
+            
+            <button type="submit" class="btn-save">儲存設定</button>
+        </form>
+    `;
+    
+    document.getElementById('configForm').addEventListener('submit', saveConfig);
+}
+
+async function saveConfig(event) {
+    event.preventDefault();
+    
+    const btn = document.querySelector('.btn-save');
+    btn.disabled = true;
+    btn.textContent = '儲存中...';
+    
+    const data = {
+        shioaji: {
+            simulation: document.getElementById('shioaji_simulation').checked,
+            api_key: document.getElementById('shioaji_api_key').value,
+            secret_key: document.getElementById('shioaji_secret_key').value,
+        },
+        llm: {
+            provider: document.getElementById('llm_provider').value,
+            model: document.getElementById('llm_model').value,
+            temperature: parseFloat(document.getElementById('llm_temperature').value),
+            max_tokens: parseInt(document.getElementById('llm_max_tokens').value),
+            base_url: document.getElementById('llm_base_url').value,
+            api_key: document.getElementById('llm_api_key').value,
+        },
+        telegram: {
+            enabled: document.getElementById('telegram_enabled').checked,
+            bot_token: document.getElementById('telegram_bot_token').value,
+            chat_id: document.getElementById('telegram_chat_id').value,
+        },
+        risk: {
+            max_daily_loss: parseInt(document.getElementById('risk_max_daily_loss').value),
+            max_position: parseInt(document.getElementById('risk_max_position').value),
+            max_orders_per_minute: parseInt(document.getElementById('risk_max_orders_per_minute').value),
+            enable_stop_loss: document.getElementById('risk_enable_stop_loss').checked,
+            enable_take_profit: document.getElementById('risk_enable_take_profit').checked,
+        },
+        trading: {
+            check_interval: parseInt(document.getElementById('trading_check_interval').value),
+            trading_hours: {
+                day_start: document.getElementById('trading_day_start').value,
+                day_end: document.getElementById('trading_day_end').value,
+                night_start: document.getElementById('trading_night_start').value,
+                night_end: document.getElementById('trading_night_end').value,
+            }
+        },
+        web: {
+            enabled: document.getElementById('web_enabled').checked,
+            host: document.getElementById('web_host').value,
+            port: parseInt(document.getElementById('web_port').value),
+        }
+    };
+    
+    try {
+        const response = await fetch('/api/config', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+        });
+        const result = await response.json();
+        
+        if (result.success) {
+            showSaveAlert(result.message, 'success');
+            loadConfig();
+        } else {
+            showSaveAlert('儲存失敗: ' + result.error, 'error');
+        }
+    } catch (error) {
+        showSaveAlert('儲存失敗: ' + error.message, 'error');
+    }
+    
+    btn.disabled = false;
+    btn.textContent = '儲存設定';
+}
+
+function showAlert(message, type) {
+    const container = document.getElementById('alert-container');
+    container.innerHTML = `<div class="alert alert-${type}">${message}</div>`;
+    setTimeout(() => {
+        container.innerHTML = '';
+    }, 5000);
+}
+
+function showSaveAlert(message, type) {
+    const container = document.getElementById('save-alert');
+    container.innerHTML = `<div class="alert alert-${type}">${message}</div>`;
+    setTimeout(() => {
+        container.innerHTML = '';
+    }, 5000);
+}
+
+loadConfig();
+</script>
+{% endblock %}

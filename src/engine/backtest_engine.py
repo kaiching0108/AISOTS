@@ -77,10 +77,10 @@ def calculate_indicators(df: pd.DataFrame, indicators: Dict[str, bool]) -> pd.Da
     Returns:
         DataFrame: 包含計算後指標的 DataFrame
     """
-    close = df['close']
-    high = df['high']
-    low = df['low']
-    volume = df['volume']
+    close = df['Close']
+    high = df['High']
+    low = df['Low']
+    volume = df['Volume']
     
     if indicators.get('rsi'):
         df['rsi'] = ta.rsi(close, length=14)
@@ -129,6 +129,20 @@ def calculate_indicators(df: pd.DataFrame, indicators: Dict[str, bool]) -> pd.Da
 
 class BacktestEngine:
     """backtesting.py 回測引擎"""
+    
+    # 每個 timeframe 每天的 K 棒數量
+    KBARS_PER_DAY = {
+        "1m": 1440,
+        "5m": 288,
+        "15m": 96,
+        "30m": 48,
+        "60m": 24,
+        "1h": 24,
+        "1d": 1,
+    }
+    
+    # 最大 K 棒數量限制（避免回測太久）
+    MAX_KBARS = 10000
     
     TIMEFRAME_CONFIG = {
         "1m": (7, "1週"),
@@ -322,10 +336,17 @@ class BacktestEngine:
             contract_multiplier = contract_multiplier_map.get(symbol, 1)
             logger.info(f"合約乘數: {contract_multiplier}")
             
+            # 計算 K 棒數量：根據 timeframe 計算每天的 K 棒數，再乘以天數
+            kbars_per_day = self.KBARS_PER_DAY.get(timeframe, 96)
+            calculated_count = days * kbars_per_day
+            # 取計算數量和最大限制的較小值
+            kbars_count = min(calculated_count, self.MAX_KBARS)
+            logger.info(f"K 棒數量: {days} 天 × {kbars_per_day} 棒/天 = {calculated_count} 棒 (限制: {self.MAX_KBARS} 棒)")
+            
             kbars_data = self.client.get_kbars(
                 contract, 
                 timeframe, 
-                count=days * 500
+                count=kbars_count
             )
             
             if not kbars_data or not kbars_data.get("ts"):
@@ -379,35 +400,26 @@ class BacktestEngine:
             if strategy_id and strategy_version:
                 try:
                     BACKTEST_DIR.mkdir(parents=True, exist_ok=True)
-                    timestamp = datetime.now().strftime("%Y%m%d%H%M")
-                    filename = f"{strategy_id}_v{strategy_version}_{timestamp}.png"
+                    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+                    filename = f"{strategy_id}_v{strategy_version}_{timestamp}.html"
                     chart_path = BACKTEST_DIR / filename
                     
-                    fig = bt.plot(
-                        symbol=symbol,
-                        open_browser=False,
-                        return_fig=True
+                    # 生成交互式 HTML 圖表
+                    bt.plot(
+                        filename=str(chart_path),
+                        open_browser=False
                     )
-                    
-                    fig.savefig(
-                        chart_path,
-                        dpi=100,
-                        bbox_inches='tight',
-                        facecolor='white',
-                        edgecolor='none'
-                    )
-                    plt.close(fig)
                     
                     logger.info(f"Chart saved to: {chart_path}")
                 except Exception as e:
                     logger.warning(f"Failed to generate chart: {e}")
                     chart_path = None
             
-            total_return = stats['Return [%]'] if stats['Return [%]'] else 0
-            sharpe = stats['Sharpe Ratio'] if stats['Sharpe Ratio'] else 0
-            max_dd = stats['Max. Drawdown [%]'] if stats['Max. Drawdown [%]'] else 0
-            trade_count = stats['# Trades'] if stats['# Trades'] else 0
-            win_rate = stats['Win Rate [%]'] if stats['Win Rate [%]'] else 0
+            total_return = stats.get('Return [%]', 0) or 0
+            sharpe = stats.get('Sharpe Ratio', 0) or 0
+            max_dd = stats.get('Max. Drawdown [%]', 0) or 0
+            trade_count = stats.get('# Trades', 0) or 0
+            win_rate = stats.get('Win Rate [%]', 0) or 0
             
             # 計算總損益（乘以合約乘數）
             total_pnl = initial_capital * total_return / 100 * contract_multiplier
@@ -425,12 +437,11 @@ class BacktestEngine:
             net_pnl = total_pnl - total_commission
             
             sqn = 0
-            if trade_count > 0 and stats['Avg. Trade [%]']:
-                avg_trade_pct = stats['Avg. Trade [%]']
-                if stats['Std. Trade [%)']:
-                    std_trade = stats['Std. Trade [%)']
-                    if std_trade > 0:
-                        sqn = (avg_trade_pct / std_trade) * (trade_count ** 0.5)
+            avg_trade_pct = stats.get('Avg. Trade [%]', 0) or 0
+            std_trade = stats.get('Std. Trade [%]', 0) or 0
+            if trade_count > 0 and avg_trade_pct and std_trade:
+                if std_trade > 0:
+                    sqn = (avg_trade_pct / std_trade) * (trade_count ** 0.5)
             
             won_trades = int(trade_count * win_rate / 100) if trade_count > 0 else 0
             lost_trades = trade_count - won_trades
@@ -458,6 +469,9 @@ class BacktestEngine:
                 "avg_trade": round(net_pnl / trade_count, 0) if trade_count > 0 else 0,
             }
             
+            # 生成策略分析
+            analysis = self._generate_analysis(metrics, symbol)
+            
             report = self._format_report(
                 class_name=class_name or "Strategy",
                 symbol=symbol,
@@ -477,6 +491,7 @@ class BacktestEngine:
                 "report": report,
                 "metrics": metrics,
                 "chart_path": str(chart_path) if chart_path else None,
+                "analysis": analysis,
                 "error": None,
             }
             
@@ -490,7 +505,9 @@ class BacktestEngine:
                 "error": "請安裝 backtesting: pip install backtesting"
             }
         except Exception as e:
+            import traceback
             logger.error(f"Backtest error: {e}")
+            logger.error(f"Backtest traceback: {traceback.format_exc()}")
             return {
                 "passed": False,
                 "report": "",
@@ -498,6 +515,112 @@ class BacktestEngine:
                 "chart_path": None,
                 "error": f"回測過程發生錯誤: {str(e)}"
             }
+    
+    def _generate_analysis(self, metrics: dict, symbol: str) -> str:
+        """根據回測指標生成策略分析
+        
+        Args:
+            metrics: 回測指標字典
+            symbol: 期貨代碼
+            
+        Returns:
+            str: 格式化的分析報告
+        """
+        # 獲取合約乘數
+        multiplier_map = {"TXF": 200, "MXF": 50, "TMF": 10}
+        multiplier = multiplier_map.get(symbol, 10)
+        
+        total_return = metrics.get('total_return', 0)
+        total_pnl = metrics.get('total_pnl', 0)
+        trade_count = metrics.get('trade_count', 0)
+        win_rate = metrics.get('win_rate', 0)
+        max_drawdown = metrics.get('max_drawdown', 0)
+        sharpe = metrics.get('sharpe_ratio', 0)
+        profit_factor = metrics.get('profit_factor', 0)
+        total_commission = metrics.get('total_commission', 0)
+        
+        # 1. 總結
+        if total_pnl > 0:
+            summary = f"✅ 策略在回測期間為您賺了 {total_pnl:+.0f} 元（未扣除手續費）"
+        elif total_pnl == 0:
+            summary = "➖ 策略在回測期間持平"
+        else:
+            summary = f"❌ 策略在回測期間虧損了 {total_pnl:.0f} 元"
+        
+        # 2. 風控評估
+        risk_assessment = []
+        if max_drawdown > 15:
+            risk_assessment.append(f"⚠️ 最大回撤高達 {max_drawdown:.1f}%，風險較大")
+        elif max_drawdown > 10:
+            risk_assessment.append(f"⚡ 最大回撤 {max_drawdown:.1f}%，中等風險")
+        else:
+            risk_assessment.append(f"✅ 最大回撤僅 {max_drawdown:.1f}%，風險控制良好")
+        
+        # 3. 穩定性評估
+        stability = []
+        if sharpe > 1.5:
+            stability.append(f"✅ 夏普比率 {sharpe:.2f}，風險調整後收益優秀")
+        elif sharpe > 1.0:
+            stability.append(f"⚡ 夏普比率 {sharpe:.2f}，風險調整後收益一般")
+        elif sharpe > 0:
+            stability.append(f"⚠️ 夏普比率 {sharpe:.2f}，風險調整後收益較差")
+        else:
+            stability.append(f"❌ 夏普比率 {sharpe:.2f}，策略不穩定")
+        
+        # 4. 交易頻率
+        if trade_count == 0:
+            freq_note = "⚠️ 沒有任何交易信號，可能策略條件過於嚴格"
+        elif trade_count < 5:
+            freq_note = f"⚠️ 交易次數僅 {trade_count} 次，可能過於保守"
+        elif trade_count > 50:
+            freq_note = f"⚠️ 交易次數高達 {trade_count} 次，可能過度交易"
+        else:
+            freq_note = f"✅ 交易次數 {trade_count} 次，頻率合理"
+        
+        # 5. 勝率評估
+        if win_rate > 60:
+            win_note = f"✅ 勝率 {win_rate:.1f}%，表現優異"
+        elif win_rate > 50:
+            win_note = f"⚡ 勝率 {win_rate:.1f}%，略高於一半"
+        else:
+            win_note = f"⚠️ 勝率 {win_rate:.1f}%，較低"
+        
+        # 6. 盈虧比
+        if profit_factor > 1.5:
+            pf_note = f"✅ 盈虧比 {profit_factor:.2f}，賺多賠少"
+        elif profit_factor > 1.0:
+            pf_note = f"⚡ 盈虧比 {profit_factor:.2f}，勉強持平"
+        else:
+            pf_note = f"❌ 盈虧比 {profit_factor:.2f}，賺少赔多"
+        
+        # 7. 手續費
+        commission_note = f"📊 回測期間手續費合計：{total_commission:,.0f} 元"
+        
+        # 組裝報告
+        analysis = f"""{summary}
+
+📈 風控評估
+{chr(10).join(risk_assessment)}
+
+📊 穩定性
+{chr(10).join(stability)}
+
+🎯 交易頻率
+{freq_note}
+
+🏆 勝率
+{win_note}
+
+💰 盈虧比
+{pf_note}
+
+💸 手續費
+{commission_note}
+
+---
+💡 提醒：過去表現不代表未來收益，請謹慎評估風險后再實際交易。"""
+        
+        return analysis
     
     def _format_report(
         self,

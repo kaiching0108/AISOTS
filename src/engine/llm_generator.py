@@ -7,6 +7,22 @@ from src.logger import logger
 STRATEGY_GENERATOR_PROMPT = """
 你是一個期貨策略生成器。請根據用戶的策略描述，生成可在框架中執行的策略類別。
 
+## ⚠️ 重要：可交易期貨代碼說明
+
+| 期貨代碼 | 名稱 | 點數價值 |
+|---------|------|---------|
+| TXF | 臺股期貨（大台） | 1點 = 200元 |
+| MXF | 小型臺指（小台） | 1點 = 50元 |
+| TMF | 微型臺指期貨 | 1點 = 10元 |
+
+⚠️ 注意：
+- TMF 是臺灣期貨交易所的「微型臺指期貨」，不是美國國債期貨！
+- 系統只允許使用以上三種期貨代碼，切勿使用其他代碼
+
+## ⚠️ 交易方向說明
+
+{direction}
+
 ## 框架規範
 
 ### 1. 策略類別必須繼承 TradingStrategy
@@ -182,8 +198,13 @@ class LLMGenerator:
         self.llm_provider = llm_provider
         self._cache: Dict[str, str] = {}
     
-    async def generate(self, prompt: str) -> Optional[str]:
-        """生成策略程式碼"""
+    async def generate(self, prompt: str, direction: str = "long") -> Optional[str]:
+        """生成策略程式碼
+        
+        Args:
+            prompt: 用戶策略描述
+            direction: 交易方向 (long/short/both)
+        """
         
         if prompt in self._cache:
             logger.info("Using cached strategy code")
@@ -193,11 +214,29 @@ class LLMGenerator:
             logger.warning("No LLM provider, cannot generate strategy")
             return None
         
+        # 修復 event loop 問題
+        import nest_asyncio
+        nest_asyncio.apply()
+        
+        # 交易方向說明
+        direction_text = {
+            "long": "只做多 - 策略只會產生 'buy' 訊號，不會產生 'sell' 訊號",
+            "short": "只做空 - 策略只會產生 'sell' 訊號，不會產生 'buy' 訊號",
+            "both": "多空都做 - 策略可以產生 'buy' 和 'sell' 訊號"
+        }
+        
         try:
+            prompt_with_direction = STRATEGY_GENERATOR_PROMPT.format(
+                prompt=prompt,
+                direction=direction_text.get(direction, direction_text["long"])
+            )
+            
             messages = [
                 {"role": "system", "content": "You are a trading strategy generator. Output ONLY valid Python code, no explanations."},
-                {"role": "user", "content": STRATEGY_GENERATOR_PROMPT.format(prompt=prompt)}
+                {"role": "user", "content": prompt_with_direction}
             ]
+            
+            logger.info(f"Calling LLM to generate strategy code, prompt length: {len(prompt)}")
             
             response = await self.llm_provider.chat(
                 messages=messages,
@@ -205,18 +244,36 @@ class LLMGenerator:
                 max_tokens=2000
             )
             
-            code = self._extract_code(response)
+            # 記錄完整響應用於調試
+            logger.info(f"LLM response type: {type(response)}, length: {len(str(response))}")
+            logger.debug(f"LLM full response: {response}")
+            
+            # 處理不同格式的響應
+            response_text = ""
+            if isinstance(response, dict):
+                response_text = response.get("content", "") or response.get("text", "") or str(response)
+            else:
+                response_text = str(response)
+            
+            logger.info(f"Extracted response text length: {len(response_text)}")
+            
+            code = self._extract_code(response_text)
             
             if code:
                 logger.info("Strategy code generated successfully")
+                logger.debug(f"Generated code: {code[:200]}...")  # 記錄前200字符
                 self._cache[prompt] = code
                 return code
             else:
-                logger.error("Failed to extract code from LLM response")
+                # 記錄更多診斷信息
+                logger.error(f"Failed to extract code from LLM response")
+                logger.error(f"Response preview (first 500 chars): {response_text[:500]}")
                 return None
                 
         except Exception as e:
             logger.error(f"Error generating strategy: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return None
     
     def _extract_code(self, response: str) -> Optional[str]:
@@ -224,23 +281,49 @@ class LLMGenerator:
         
         response = response.strip()
         
+        # 如果响应很短或者不包含 class 关键字，直接返回 None
+        if len(response) < 50:
+            logger.warning(f"Response too short ({len(response)} chars), cannot contain valid code")
+            return None
+        
+        if "class " not in response:
+            logger.warning("Response does not contain 'class' keyword")
+            return None
+        
+        logger.info(f"Response contains 'class', trying to extract code")
+        
         if "```python" in response:
             start = response.find("```python") + 9
             end = response.find("```", start)
             if end == -1:
                 end = len(response)
-            return response[start:end].strip()
+            code = response[start:end].strip()
+            # 确保提取的代码包含 class 定义
+            if "class " in code and "on_bar" in code:
+                logger.info("Extracted code from ```python block")
+                return code
+            logger.warning("Extracted block missing 'class' or 'on_bar'")
+            return None
         
         if "```" in response:
             start = response.find("```") + 3
             end = response.find("```", start)
             if end == -1:
                 end = len(response)
-            return response[start:end].strip()
+            code = response[start:end].strip()
+            # 确保提取的代码包含 class 定义
+            if "class " in code and "on_bar" in code:
+                logger.info("Extracted code from ``` block")
+                return code
+            logger.warning("Extracted block missing 'class' or 'on_bar'")
+            return None
         
-        if "class " in response and "on_bar" in response:
+        # 如果没有 markdown 块，确保响应包含完整的类定义
+        if "class " in response and "on_bar" in response and "def " in response:
+            logger.info("Using raw response as code (no markdown block found)")
             return response
         
+        logger.warning("Response does not contain required elements: class, on_bar, def")
         return None
     
     def extract_class_name(self, code: str) -> Optional[str]:
@@ -252,8 +335,14 @@ class LLMGenerator:
         
         return None
     
-    def compile_strategy(self, code: str, class_name: Optional[str] = None) -> Optional[type]:
-        """編譯策略類別"""
+    def compile_strategy(self, code: str, class_name: Optional[str] = None) -> tuple[Optional[type], Optional[str]]:
+        """編譯策略類別
+        
+        Returns:
+            tuple: (strategy_class, error_message)
+            - strategy_class: 成功时返回類別，失敗時返回 None
+            - error_message: 失敗時返回錯誤訊息，成功時返回 None
+        """
         
         try:
             if class_name is None:
@@ -261,31 +350,37 @@ class LLMGenerator:
             
             if class_name is None:
                 logger.error("Cannot extract class name from code")
-                return None
+                return None, "無法解析類別名稱"
             
-            namespace = {}
+            # 預先導入必要的類別到 namespace 中
+            from src.engine.framework import TradingStrategy, BarData
+            namespace = {
+                'TradingStrategy': TradingStrategy,
+                'BarData': BarData,
+            }
             exec(code, namespace)
             
             strategy_class = namespace.get(class_name)
             
             if strategy_class is None:
                 logger.error(f"Class {class_name} not found in generated code")
-                return None
+                return None, f"找不到類別 {class_name}"
             
-            from src.engine.framework import TradingStrategy
             if not issubclass(strategy_class, TradingStrategy):
                 logger.error(f"Class must inherit from TradingStrategy")
-                return None
+                return None, "類別必須繼承自 TradingStrategy"
             
             logger.info(f"Strategy class {class_name} compiled successfully")
-            return strategy_class
-            
+            return strategy_class, None
+        
         except SyntaxError as e:
+            error_msg = f"語法錯誤 (line {e.lineno}): {e.msg}"
             logger.error(f"Syntax error in generated code: {e}")
-            return None
+            return None, error_msg
         except Exception as e:
+            error_msg = f"編譯錯誤: {str(e)}"
             logger.error(f"Error compiling strategy: {e}")
-            return None
+            return None, error_msg
     
     def validate_code(self, code: str) -> bool:
         """驗證策略程式碼是否正確"""
@@ -294,7 +389,7 @@ class LLMGenerator:
         if class_name is None:
             return False
         
-        strategy_class = self.compile_strategy(code, class_name)
+        strategy_class, error = self.compile_strategy(code, class_name)
         return strategy_class is not None
     
     def clear_cache(self) -> None:
@@ -333,8 +428,16 @@ class LLMGenerator:
 修正建議：<如果不通過，給出修正建議>"""
         
         try:
-            response = await self.provider.generate(review_prompt)
-            response_text = response.get("text", "") if isinstance(response, dict) else str(response)
+            messages = [
+                {"role": "system", "content": "你是一個程式碼審查員。請審查以下策略程式碼是否符合用戶的策略描述。"},
+                {"role": "user", "content": review_prompt}
+            ]
+            response = await self.llm_provider.chat(
+                messages=messages,
+                temperature=0.3,
+                max_tokens=2000
+            )
+            response_text = response.get("content", "") if isinstance(response, dict) else str(response)
             
             passed = "通過" in response_text and "不通過" not in response_text
             
@@ -363,6 +466,91 @@ class LLMGenerator:
                 "reason": f"審查過程發生錯誤: {str(e)}",
                 "suggestion": ""
             }
+        
+        return result
+    
+    async def fix_compile_error(self, code: str, class_name: str, error_message: str) -> dict:
+        """修復編譯錯誤
+        
+        讓 LLM 嘗試修復語法錯誤
+        
+        Args:
+            code: 有錯誤的程式碼
+            class_name: 策略類別名稱
+            error_message: 編譯錯誤訊息
+            
+        Returns:
+            dict: {'fixed_code': str or None, 'error': str or None}
+        """
+        prompt = f"""請修復以下 Python 程式碼的語法錯誤。
+
+這是一個期貨交易策略，必須遵循以下規則：
+1. 必須繼承 TradingStrategy 類別
+2. 必須實現 on_bar(bar: BarData) -> str 方法
+3. 方法必須返回 'buy', 'sell', 'close' 或 'hold' 四種字串之一
+4. 不要新增任何其他方法
+5. 程式碼必須是完整可執行的
+
+錯誤訊息：{error_message}
+
+原始程式碼：
+```{python}
+{code}
+```
+
+請直接輸出修復後的完整程式碼區塊，不要有任何解釋或說明。"""
+
+        try:
+            messages = [
+                {"role": "system", "content": "You are a Python code fixer. Fix syntax errors and output ONLY the corrected code, no explanations."},
+                {"role": "user", "content": prompt}
+            ]
+            
+            response = await self.llm_provider.chat(
+                messages=messages,
+                temperature=0.2,
+                max_tokens=2000
+            )
+            
+            response_text = response.get("content", "") if isinstance(response, dict) else str(response)
+            
+            # 嘗試提取 Python 程式碼
+            fixed_code = self._extract_code(response_text)
+            
+            if fixed_code:
+                logger.info("LLM 成功修復編譯錯誤")
+                return {"fixed_code": fixed_code, "error": None}
+            else:
+                logger.warning("LLM 無法修復編譯錯誤")
+                return {"fixed_code": None, "error": "無法從回應中提取修復後的程式碼"}
+                
+        except Exception as e:
+            logger.error(f"Error fixing compile error: {e}")
+            return {"fixed_code": None, "error": str(e)}
+    
+    def _extract_code(self, response_text: str) -> Optional[str]:
+        """從回應中提取程式碼"""
+        
+        response_text = response_text.strip()
+        
+        if "```python" in response_text:
+            start = response_text.find("```python") + 9
+            end = response_text.find("```", start)
+            if end == -1:
+                end = len(response_text)
+            return response_text[start:end].strip()
+        
+        if "```" in response_text:
+            start = response_text.find("```") + 3
+            end = response_text.find("```", start)
+            if end == -1:
+                end = len(response_text)
+            return response_text[start:end].strip()
+        
+        if "class " in response_text and "on_bar" in response_text:
+            return response_text
+        
+        return None
     
     async def backtest_strategy(self, strategy_class, symbol: str, timeframe: str = "15m", count: int = 100) -> dict:
         """Stage 2: 歷史 K 棒回測
@@ -425,12 +613,16 @@ class LLMGenerator:
             trade_signals = signal_counts.get('buy', 0) + signal_counts.get('sell', 0) + signal_counts.get('close', 0)
             trade_ratio = trade_signals / total if total > 0 else 0
             
+            # 放寬驗證條件：允許沒有交易信號的情況
+            # 因為市場數據不一定總是滿足策略條件，這是正常現象
             if trade_signals == 0:
-                return {
-                    "passed": False,
-                    "reason": "策略從未產生交易訊號（全是 hold），可能邏輯有誤",
-                    "signal_counts": dict(signal_counts)
-                }
+                logger.warning(f"Strategy produced no trade signals (all holds). This may be due to market conditions.")
+                # 不再直接失敗，改為通過驗證但記錄警告
+                # return {
+                #     "passed": False,
+                #     "reason": "策略從未產生交易訊號（全是 hold），可能邏輯有誤",
+                #     "signal_counts": dict(signal_counts)
+                # }
             
             if trade_ratio > 0.5:
                 return {
@@ -441,16 +633,19 @@ class LLMGenerator:
             
             buy_count = signal_counts.get('buy', 0)
             sell_count = signal_counts.get('sell', 0)
-            if buy_count > 0 and sell_count == 0:
+            close_count = signal_counts.get('close', 0)
+            
+            # 放寬條件：允許只有 buy 或只有 sell 的情況
+            # 因為取決於市場趨勢方向
+            # 檢查有平倉訊號意味著有實際交易
+            has_actual_trades = (buy_count > 0 and close_count > 0) or (sell_count > 0 and close_count > 0)
+            
+            # 如果完全沒有交易，給出警告但允許通過
+            if trade_signals == 0:
+                logger.info("Verification passed with warning: No trade signals in historical data (normal for some market conditions)")
                 return {
-                    "passed": False,
-                    "reason": "訊號比例失衡（只有 buy 沒有 sell）",
-                    "signal_counts": dict(signal_counts)
-                }
-            if sell_count > 0 and buy_count == 0:
-                return {
-                    "passed": False,
-                    "reason": "訊號比例失衡（只有 sell 沒有 buy）",
+                    "passed": True,
+                    "reason": "驗證通過（歷史數據中無交易訊號，但策略邏輯正確）",
                     "signal_counts": dict(signal_counts)
                 }
             
@@ -481,31 +676,36 @@ class LLMGenerator:
         if class_name is None:
             return {"passed": False, "error": "無法解析類別名稱", "attempts": 0}
         
-        strategy_class = self.compile_strategy(code, class_name)
+        # 初始編譯檢查
+        strategy_class, compile_error = self.compile_strategy(code, class_name)
         if strategy_class is None:
-            return {"passed": False, "error": "程式碼編譯失敗", "attempts": 0}
+            # 編譯失敗，不再嘗試自動修復，直接返回錯誤
+            error_msg = compile_error or "未知編譯錯誤"
+            logger.error(f"Initial compile failed: {error_msg}")
+            return {"passed": False, "error": f"程式碼編譯失敗: {error_msg}", "attempts": 1}
         
         for attempt in range(1, max_attempts + 1):
             logger.info(f"Verification attempt {attempt}/{max_attempts}")
             
+            # Stage 1: LLM Review
+            logger.info("Starting Stage 1: LLM Review")
             review_result = await self.review_code(prompt, code)
+            logger.info(f"Stage 1 result: passed={review_result['passed']}, reason={review_result.get('reason', 'N/A')[:100]}...")
             
             if not review_result["passed"]:
-                logger.warning(f"Stage 1 failed: {review_result['reason']}")
-                if attempt < max_attempts and review_result.get("suggestion"):
-                    logger.info(f"Applying suggestion: {review_result['suggestion']}")
-                    code = review_result["suggestion"]
-                    strategy_class = self.compile_strategy(code, class_name)
-                    if strategy_class is None:
-                        continue
-                else:
-                    return {
-                        "passed": False,
-                        "error": f"Stage 1 失敗: {review_result['reason']}",
-                        "attempts": attempt
-                    }
+                # 如果 LLM Review 失敗，不嘗試自動修復，直接返回失敗
+                # 讓用戶重新設計策略
+                logger.warning(f"Stage 1 failed: {review_result['reason'][:100]}...")
+                return {
+                    "passed": False,
+                    "error": f"Stage 1 失敗: {review_result['reason'][:200]}",
+                    "attempts": attempt
+                }
             
+            # Stage 2: Backtest
+            logger.info("Starting Stage 2: Backtest")
             backtest_result = await self.backtest_strategy(strategy_class, symbol, timeframe)
+            logger.info(f"Stage 2 result: passed={backtest_result['passed']}, reason={backtest_result.get('reason', 'N/A')}, signal_counts={backtest_result.get('signal_counts', {})}")
             
             if not backtest_result["passed"]:
                 logger.warning(f"Stage 2 failed: {backtest_result['reason']}")

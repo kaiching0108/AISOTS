@@ -9,8 +9,7 @@ def get_status():
     """取得系統狀態"""
     try:
         tools = current_app.trading_tools
-        with current_app.lock:
-            status_text = tools.get_system_status()
+        status_text = tools.get_system_status()
         
         # 解析文字狀態為 JSON
         # 這裡需要從 get_system_status() 的回傳值解析

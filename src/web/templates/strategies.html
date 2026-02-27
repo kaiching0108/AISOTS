@@ -3,63 +3,119 @@
 {% block title %}策略管理 - AISOTS{% endblock %}
 
 {% block content %}
-<div class="card">
-    <div class="card-header">📋 策略列表</div>
-    <div id="strategyList">
+<!-- 已啟用的策略區域 -->
+<div class="card" style="border-left: 4px solid #27ae60;">
+    <div class="card-header" style="background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%); color: white;">
+        📋 已啟用的策略
+    </div>
+    <div id="enabledStrategyList">
+        <div class="loading">載入中...</div>
+    </div>
+</div>
+
+<!-- 未啟用的策略區域 -->
+<div class="card" style="margin-top: 20px; border-left: 4px solid #95a5a6;">
+    <div class="card-header" style="background: linear-gradient(135deg, #95a5a6 0%, #bdc3c7 100%); color: white;">
+        📋 未啟用的策略
+    </div>
+    <div id="disabledStrategyList">
         <div class="loading">載入中...</div>
     </div>
 </div>
 {% endblock %}
 
 {% block extra_js %}
-<script>
+    // 策略卡片 HTML 生成函數
+    function generateStrategyCard(s) {
+        return `
+            <div class="strategy-item">
+                <div class="strategy-header">
+                    <div>
+                        <span class="badge ${s.enabled ? 'badge-success' : 'badge-danger'}">
+                            ${s.enabled ? '✅ 啟用' : '❌ 停用'}
+                        </span>
+                        <span class="strategy-name">${s.name}</span>
+                        <span style="color: #666; margin-left: 10px;">${s.id}</span>
+                    </div>
+                </div>
+                <div class="strategy-info">
+                    <div>期貨: ${s.symbol}</div>
+                    <div>版本: v${s.version}</div>
+                    <div>週期: ${s.timeframe || '-'}</div>
+                    <div>口數: ${s.quantity || '-'}</div>
+                    <div>方向: ${s.direction === 'short' ? '做空' : '做多'}</div>
+                    <div>停損: ${s.stop_loss || '-'} 點</div>
+                    <div>停利: ${s.take_profit || '-'} 點</div>
+                    <div>創建: ${s.created_at || '-'}</div>
+                    <div>目標: ${s.goal ? s.goal + '/' + (s.goal_unit === 'daily' ? '日' : s.goal_unit === 'weekly' ? '週' : s.goal_unit === 'monthly' ? '月' : s.goal_unit) : '未設定'}</div>
+                    ${s.goal ? `<div style="color: #27ae60; font-size: 12px;">自動 Review: 每 ${s.review_period} ${s.review_unit === 'day' ? '天' : s.review_unit === 'week' ? '週' : s.review_unit === 'month' ? '月' : s.review_unit}</div>` : '<div style="color: #999; font-size: 12px;">設定目標後可啟用自動 Review</div>'}
+                </div>
+                ${s.position ? `
+                <div style="margin-top: 10px; padding: 10px; background: #fff3cd; border-radius: 5px; font-size: 13px;">
+                    <strong>⚠️ 仍有部位</strong>: ${s.position.direction} ${s.position.quantity}口 @ ${s.position.entry_price}
+                    (${s.position.pnl >= 0 ? '+' : ''}${s.position.pnl})
+                </div>
+                ` : ''}
+                <div class="strategy-actions">
+                    <button class="btn btn-primary btn-sm" onclick="editGoal('${s.id}', ${s.goal !== null && s.goal !== undefined ? s.goal : 'null'}, '${s.goal_unit || 'daily'}', ${s.review_period !== null && s.review_period !== undefined ? s.review_period : 5}, '${s.review_unit || 'day'}')">🎯 目標</button>
+                    ${s.enabled ? 
+                        `<button class="btn btn-warning btn-sm" onclick="disableStrategy('${s.id}', ${s.has_position})">停用</button>` :
+                        `<button class="btn btn-success btn-sm" onclick="enableStrategy('${s.id}')">啟用</button>`
+                    }
+                    <button class="btn btn-primary btn-sm" onclick="runBacktest('${s.id}', '${s.name}')">回測</button>
+                    <button class="btn btn-info btn-sm" onclick="viewCode('${s.id}')">📄</button>
+                    <button class="btn btn-danger btn-sm" onclick="deleteStrategy('${s.id}', ${s.has_position})">刪除</button>
+                </div>
+            </div>
+        `;
+    }
+    
     async function loadStrategies() {
         try {
+            console.log('Loading strategies...');
             const response = await fetch('/api/strategies');
-            const data = await response.json();
+            console.log('Response status:', response.status);
             
-            if (!data.success || !data.data || data.data.length === 0) {
-                document.getElementById('strategyList').innerHTML = '<div class="empty-state">目前沒有策略</div>';
+            if (!response.ok) {
+                throw new Error('HTTP ' + response.status + ': ' + response.statusText);
+            }
+            
+            const data = await response.json();
+            console.log('Response data:', data);
+            
+            if (!data.success) {
+                throw new Error(data.error || 'API 返回失敗');
+            }
+            
+            if (!data.data || data.data.length === 0) {
+                document.getElementById('enabledStrategyList').innerHTML = '<div class="empty-state">目前沒有策略</div>';
+                document.getElementById('disabledStrategyList').innerHTML = '<div class="empty-state">目前沒有策略</div>';
                 return;
             }
             
-            document.getElementById('strategyList').innerHTML = data.data.map(s => `
-                <div class="strategy-item">
-                    <div class="strategy-header">
-                        <div>
-                            <span class="badge ${s.enabled ? 'badge-success' : 'badge-danger'}">
-                                ${s.enabled ? '✅ 啟用' : '❌ 停用'}
-                            </span>
-                            <span class="strategy-name">${s.name}</span>
-                            <span style="color: #666; margin-left: 10px;">${s.id}</span>
-                        </div>
-                    </div>
-                    <div class="strategy-info">
-                        <div>期貨: ${s.symbol}</div>
-                        <div>版本: v${s.version}</div>
-                        <div>週期: ${s.timeframe || '-'}</div>
-                        <div>口數: ${s.quantity || '-'}</div>
-                    </div>
-                    ${s.position ? `
-                    <div style="margin-top: 10px; padding: 10px; background: #fff3cd; border-radius: 5px; font-size: 13px;">
-                        <strong>⚠️ 仍有部位</strong>: ${s.position.direction} ${s.position.quantity}口 @ ${s.position.entry_price}
-                        (${s.position.pnl >= 0 ? '+' : ''}${s.position.pnl})
-                    </div>
-                    ` : ''}
-                    <div class="strategy-actions">
-                        ${s.enabled ? 
-                            `<button class="btn btn-warning btn-sm" onclick="disableStrategy('${s.id}', ${s.has_position})">停用</button>` :
-                            `<button class="btn btn-success btn-sm" onclick="enableStrategy('${s.id}')">啟用</button>`
-                        }
-                        <button class="btn btn-primary btn-sm" onclick="runBacktest('${s.id}')">回測</button>
-                        <button class="btn btn-info btn-sm" onclick="viewCode('${s.id}')">📄</button>
-                        <button class="btn btn-danger btn-sm" onclick="deleteStrategy('${s.id}', ${s.has_position})">刪除</button>
-                    </div>
-                </div>
-            `).join('');
+            // 將策略分為啟用和未啟用兩組
+            const enabledStrategies = data.data.filter(s => s.enabled);
+            const disabledStrategies = data.data.filter(s => !s.enabled);
+            
+            // 渲染已啟用的策略
+            if (enabledStrategies.length === 0) {
+                document.getElementById('enabledStrategyList').innerHTML = '<div class="empty-state" style="padding: 30px; color: #666;">目前沒有啟用的策略</div>';
+            } else {
+                document.getElementById('enabledStrategyList').innerHTML = enabledStrategies.map(s => generateStrategyCard(s)).join('');
+            }
+            
+            // 渲染未啟用的策略
+            if (disabledStrategies.length === 0) {
+                document.getElementById('disabledStrategyList').innerHTML = '<div class="empty-state" style="padding: 30px; color: #666;">目前沒有未啟用的策略</div>';
+            } else {
+                document.getElementById('disabledStrategyList').innerHTML = disabledStrategies.map(s => generateStrategyCard(s)).join('');
+            }
+            
         } catch (e) {
-            console.error(e);
-            document.getElementById('strategyList').innerHTML = '<div class="empty-state">載入失敗</div>';
+            console.error('Error loading strategies:', e);
+            const errorMsg = e.message || '未知錯誤';
+            document.getElementById('enabledStrategyList').innerHTML = '<div class="empty-state">載入失敗: ' + errorMsg + '</div>';
+            document.getElementById('disabledStrategyList').innerHTML = '<div class="empty-state">載入失敗: ' + errorMsg + '</div>';
         }
     }
     
@@ -113,34 +169,68 @@
             }
             alert(checkRes.message);
         } else {
-            if (!confirm('確定要刪除這個策略嗎？')) return;
-            const result = await apiCall('/api/strategies/' + id, 'DELETE');
-            alert(result.message);
+            showSimpleConfirmModal('刪除策略', '確定要刪除這個策略嗎？', async function() {
+                const result = await apiCall('/api/strategies/' + id, 'DELETE');
+                alert(result.message);
+                loadStrategies();
+            });
         }
-        loadStrategies();
     }
     
-    async function runBacktest(id) {
-        if (!confirm('確定要執行回測嗎？')) return;
-        
-        const result = await apiCall('/api/backtest/' + id, 'POST');
-        if (result.success) {
-            alert('回測完成！\n\n' + result.report);
-        } else {
-            alert('回測失敗: ' + (result.error || result.report));
-        }
+    async function runBacktest(id, strategyName) {
+        showSimpleConfirmModal('執行回測', '確定要執行回測嗎？', async function() {
+            closeSimpleConfirmModal();
+            showBacktestResultModal(strategyName + ' - 回測結果');
+            
+            try {
+                const result = await apiCall('/api/backtest/' + id, 'POST');
+                if (result.success) {
+                    updateBacktestResult(result.chart_path, result.report);
+                } else {
+                    showBacktestError(result.error || result.report);
+                }
+            } catch (e) {
+                showBacktestError(e.message);
+            }
+        });
     }
     
     async function viewCode(id) {
         const result = await apiCall('/api/strategies/' + id, 'GET');
         if (result.success && result.data) {
-            showCodeModal(result.data.name + ' (' + id + ')', result.data.strategy_code);
+            showCodeModal(result.data.name + ' (' + id + ')', result.data.strategy_code, result.data.prompt);
         } else {
             alert('載入失敗: ' + (result.error || '未知錯誤'));
         }
     }
     
+    async function editGoal(id, goal, goalUnit, reviewPeriod, reviewUnit) {
+        showGoalModal(goal, goalUnit, reviewPeriod, reviewUnit, async function(data) {
+            const result = await apiCall('/api/strategies/' + id + '/goal', 'POST', {
+                goal: data.goal,
+                goal_unit: data.goalUnit,
+                review_period: data.reviewPeriod,
+                review_unit: data.reviewUnit
+            });
+            
+            alert(result.message);
+            loadStrategies();
+        });
+    }
+    
+    function apiCall(url, method, body = null) {
+        return fetch(url, {
+            method: method,
+            headers: {'Content-Type': 'application/json'},
+            body: body ? JSON.stringify(body) : null
+        }).then(r => r.json());
+    }
+    
+    if (typeof REFRESH_INTERVAL === 'undefined') {
+        const REFRESH_INTERVAL = 30000;
+    }
+    
     loadStrategies();
     setInterval(loadStrategies, REFRESH_INTERVAL);
-</script>
+    </script>
 {% endblock %}

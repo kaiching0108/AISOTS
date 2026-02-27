@@ -33,6 +33,11 @@ class CustomProvider(BaseProvider):
     
     def __init__(self, config):
         super().__init__(config)
+        
+        # 修復 event loop 問題
+        import nest_asyncio
+        nest_asyncio.apply()
+        
         self.base_url = config.base_url or "http://localhost:11434/v1"
         self.api_key = config.api_key or os.environ.get("OPENAI_API_KEY", "")
         self.client = httpx.AsyncClient(

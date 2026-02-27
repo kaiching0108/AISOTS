@@ -238,26 +238,26 @@ class StrategyStore(JSONStore):
             deleted = True
         
         # 刪除部位檔案
-        position_file = self.workspace_dir / "positions" / f"{strategy_id}_positions.json"
+        position_file = self.workspace / "positions" / f"{strategy_id}_positions.json"
         if position_file.exists():
             position_file.unlink()
             deleted = True
         
         # 刪除訂單檔案
-        order_file = self.workspace_dir / "orders" / f"{strategy_id}_orders.json"
+        order_file = self.workspace / "orders" / f"{strategy_id}_orders.json"
         if order_file.exists():
             order_file.unlink()
             deleted = True
         
         # 刪除訊號檔案（所有版本）
-        signals_dir = self.workspace_dir / "signals"
+        signals_dir = self.workspace / "signals"
         if signals_dir.exists():
             for f in signals_dir.glob(f"{strategy_id}_v*.json"):
                 f.unlink()
                 deleted = True
         
         # 刪除回測圖片（所有版本）
-        backtest_dir = self.workspace_dir / "backtests"
+        backtest_dir = self.workspace / "backtests"
         if backtest_dir.exists():
             for f in backtest_dir.glob(f"{strategy_id}_v*.png"):
                 f.unlink()

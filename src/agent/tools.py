@@ -272,12 +272,6 @@ ID: {strategy_id}
 
 ⏰ 系統將在交易時間內自動執行交易
 
-📊 可用指令：
-• `status {strategy_id}` - 查看策略狀態
-• `positions` - 查看目前部位
-• `performance` - 查看當日績效
-• `disable {strategy_id}` - 停用策略
-
 ────────────────────
 ✅ 策略已啟動完成，無需其他操作！"""
             if disabled:
@@ -366,7 +360,7 @@ ID: {strategy_id}
         symbol = symbol.upper().strip()
         year = str(datetime.now().year)[-2:]
         
-        for num in range(10000):
+        for num in range(1, 10000):
             new_id = f"{symbol}{year}{num:04d}"
             if not self.strategy_mgr.get_strategy(new_id):
                 return new_id
@@ -620,7 +614,13 @@ ID: {strategy_id}
                 import nest_asyncio
                 nest_asyncio.apply()
                 
-                design_prompt = f"""請為以下交易策略設計具體的交易邏輯和進出場條件：
+                design_prompt = f"""⚠️ 重要提醒：這裡的 TMF/TXF/MXF 是台灣期貨交易所的期貨合約代碼，不是美國ETF！
+
+TMF = 台灣期貨交易所的微型臺指期貨（10元/點）
+TXF = 台灣期貨交易所的臺股期貨/大台（200元/點）
+MXF = 台灣期貨交易所的小型臺指期貨/小台（50元/點）
+
+請為以下交易策略設計具體的交易邏輯和進出場條件：
 
 目標：{goal}
 商品：{symbol}
@@ -886,12 +886,41 @@ K線週期: {params['timeframe']}
             },
             enabled=False,
             goal=params.get("goal"),
-            goal_unit=params.get("goal_unit", "daily")
+            goal_unit=params.get("goal_unit", "daily"),
+            direction=params.get("direction", "long")
         )
         
         self.strategy_mgr.add_strategy(strategy)
         
-        verify_result = asyncio.run(self._verify_strategy_at_creation(strategy))
+        # 使用 nest_asyncio 来处理异步调用
+        import nest_asyncio
+        nest_asyncio.apply()
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_closed():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            verify_result = loop.run_until_complete(self._verify_strategy_at_creation(strategy))
+        except RuntimeError as e:
+            # 如果获取 event loop 失败，尝试创建新的
+            logger.warning(f"Event loop error: {e}, creating new loop")
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            verify_result = loop.run_until_complete(self._verify_strategy_at_creation(strategy))
+        
+        if not verify_result["passed"]:
+            error_msg = verify_result.get('error', '未知錯誤')
+            logger.warning(f"Strategy verification failed: {error_msg}")
+            self.strategy_mgr.delete_strategy(strategy_id)
+            self._clear_pending()
+            return f"""❌ 驗證失敗（3 次嘗試）
+{'='*30}
+原因：{error_msg}
+
+{'='*30}
+請重新設計策略，例如：
+• 「幫我設計一個更簡單的 TMF 策略」
+• 「幫我設計一個 RSI 策略」"""
         
         self.strategy_mgr.store.save_strategy(strategy.to_dict())
         
@@ -921,12 +950,7 @@ K線週期: {params['timeframe']}
         else:
             display_prompt = clean_prompt
         
-        if verify_result["passed"]:
-            verification_text = f"✅ 驗證狀態：通過"
-        else:
-            verification_text = f"❌ 驗證狀態：失敗\n原因：{verify_result.get('error', '未知錯誤')}"
-        
-        result = f"""✅ 策略已建立（停用中）
+        result = f"""✅ 策略已建立並通過驗證（停用中）
 {'='*30}
 
 📌 基本資訊
@@ -939,12 +963,8 @@ K線週期: {params['timeframe']}
 📊 風險控制
 停損: {params['stop_loss']}點
 止盈: {params['take_profit']}點
-{goal_text}
-📝 策略描述
+{goal_text}📝 策略描述
 {display_prompt}
-
-{'='*30}
-{verification_text}
 
 {'='*30}
 ⚠️ 策略已建立但尚未啟用！
@@ -1182,26 +1202,43 @@ K線週期: {data['timeframe']}
         """
         from src.engine.llm_generator import LLMGenerator
         
+        # 修复 event loop 问题
+        import nest_asyncio
+        nest_asyncio.apply()
+        
         if not self._llm_provider:
             logger.warning("No LLM provider, skipping verification")
             return {"passed": True, "error": None}
+        
+        def _notify_progress(msg: str):
+            """發送進度通知"""
+            if self.notifier:
+                try:
+                    self.notifier.send_message(msg)
+                except Exception:
+                    pass
         
         try:
             llm_generator = LLMGenerator(self._llm_provider)
             
             logger.info(f"Starting verification for strategy: {strategy.id}")
+            _notify_progress("🔍 開始驗證策略...")
             
-            code = await llm_generator.generate(strategy.prompt)
+            # 獲取交易方向，預設為 long
+            direction = getattr(strategy, 'direction', 'long')
+            code = await llm_generator.generate(strategy.prompt, direction=direction)
             
             if not code:
                 error_msg = "無法生成策略程式碼"
                 strategy.set_verification_failed(error_msg)
+                _notify_progress(f"❌ 驗證失敗：{error_msg}")
                 return {"passed": False, "error": error_msg}
             
             class_name = llm_generator.extract_class_name(code)
             if not class_name:
                 error_msg = "無法解析類別名稱"
                 strategy.set_verification_failed(error_msg)
+                _notify_progress(f"❌ 驗證失敗：{error_msg}")
                 return {"passed": False, "error": error_msg}
             
             strategy.set_strategy_code(code, class_name)
@@ -1218,16 +1255,21 @@ K線週期: {data['timeframe']}
             if verify_result["passed"]:
                 strategy.set_verification_passed()
                 logger.info(f"Strategy {strategy.id} verified successfully")
+                _notify_progress("✅ 驗證通過！")
                 return {"passed": True, "error": None}
             else:
-                strategy.set_verification_failed(verify_result["error"])
-                logger.warning(f"Strategy {strategy.id} verification failed: {verify_result['error']}")
-                return {"passed": False, "error": verify_result["error"]}
+                error = verify_result["error"]
+                attempts = verify_result.get("attempts", 3)
+                strategy.set_verification_failed(error)
+                logger.warning(f"Strategy {strategy.id} verification failed: {error}")
+                _notify_progress(f"⚠️ 驗證失敗 ({attempts}/3)：{error}")
+                return {"passed": False, "error": error}
                 
         except Exception as e:
             error_msg = f"驗證過程發生錯誤: {str(e)}"
             logger.error(f"Verification error for {strategy.id}: {e}")
             strategy.set_verification_failed(error_msg)
+            _notify_progress(f"❌ 驗證錯誤：{error_msg}")
             return {"passed": False, "error": error_msg}
     
     # ========== 部位工具 ==========
@@ -1976,17 +2018,17 @@ Shioaji: {'✅ 連線' if conn_status else '❌ 斷線'}
             strategy_id: 策略 ID
             
         Returns:
-            dict: {"report": str, "chart_path": str or None}
+            dict: {"report": str, "chart_path": str or None, "analysis": str or None, "metrics": dict}
         """
         strategy = self.strategy_mgr.get_strategy(strategy_id)
         if not strategy:
-            return {"report": f"❌ 找不到策略: {strategy_id}", "chart_path": None}
+            return {"report": f"❌ 找不到策略: {strategy_id}", "chart_path": None, "analysis": None, "metrics": {}}
         
         if not strategy.verified:
-            return {"report": f"❌ 策略尚未通過驗證，無法執行回測。請先啟用策略以完成驗證。", "chart_path": None}
+            return {"report": f"❌ 策略尚未通過驗證，無法執行回測。請先啟用策略以完成驗證。", "chart_path": None, "analysis": None, "metrics": {}}
         
         if not strategy.strategy_code or not strategy.strategy_class_name:
-            return {"report": f"❌ 策略缺少程式碼，無法執行回測", "chart_path": None}
+            return {"report": f"❌ 策略缺少程式碼，無法執行回測", "chart_path": None, "analysis": None, "metrics": {}}
         
         try:
             from src.engine.backtest_engine import BacktestEngine
@@ -2008,16 +2050,18 @@ Shioaji: {'✅ 連線' if conn_status else '❌ 斷線'}
             if result["passed"]:
                 return {
                     "report": result["report"],
-                    "chart_path": result.get("chart_path")
+                    "chart_path": result.get("chart_path"),
+                    "analysis": result.get("analysis"),
+                    "metrics": result.get("metrics", {})
                 }
             else:
-                return {"report": f"❌ 回測失敗: {result['error']}", "chart_path": None}
+                return {"report": f"❌ 回測失敗: {result['error']}", "chart_path": None, "analysis": None, "metrics": {}}
                 
         except ImportError as e:
-            return {"report": f"❌ 請安裝 backtesting: pip install backtesting", "chart_path": None}
+            return {"report": f"❌ 請安裝 backtesting: pip install backtesting", "chart_path": None, "analysis": None, "metrics": {}}
         except Exception as e:
             logger.error(f"Backtest error: {e}")
-            return {"report": f"❌ 回測發生錯誤: {str(e)}", "chart_path": None}
+            return {"report": f"❌ 回測發生錯誤: {str(e)}", "chart_path": None, "analysis": None, "metrics": {}}
     
     def get_tool_definitions(self) -> list:
         """取得工具定義 (for LLM)"""

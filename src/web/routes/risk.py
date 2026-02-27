@@ -9,9 +9,8 @@ def get_risk():
     """取得風控狀態"""
     try:
         tools = current_app.trading_tools
-        with current_app.lock:
-            risk_text = tools.get_risk_status()
-            risk_status = tools.risk_mgr.get_status()
+        risk_text = tools.get_risk_status()
+        risk_status = tools.risk_mgr.get_status()
         
         return jsonify({
             "success": True,
