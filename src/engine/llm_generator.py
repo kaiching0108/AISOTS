@@ -1,8 +1,14 @@
 """LLM 策略生成器 - 將用戶描述轉換為策略程式碼"""
 from typing import Optional, Dict, Any
+from pathlib import Path
+from datetime import datetime
 import re
 
 from src.logger import logger
+
+# Stage 1 審查失敗日誌目錄
+STAGE1_REVIEW_DIR = Path("workspace/logs/stage1_review")
+STAGE1_REVIEW_DIR.mkdir(parents=True, exist_ok=True)
 
 STRATEGY_GENERATOR_PROMPT = """
 你是一個期貨策略生成器。請根據用戶的策略描述，生成可在框架中執行的策略類別。
@@ -690,15 +696,71 @@ class LLMGenerator:
             # Stage 1: LLM Review
             logger.info("Starting Stage 1: LLM Review")
             review_result = await self.review_code(prompt, code)
-            logger.info(f"Stage 1 result: passed={review_result['passed']}, reason={review_result.get('reason', 'N/A')[:100]}...")
+            
+            # 詳細記錄 Stage 1 結果（不截斷）
+            if review_result["passed"]:
+                logger.info(f"Stage 1 PASSED: {review_result.get('reason', 'N/A')}")
+            else:
+                # Stage 1 失敗 - 詳細記錄所有資訊到控制台
+                logger.warning("=" * 80)
+                logger.warning("STAGE 1 FAILED - DETAILED LOG")
+                logger.warning("=" * 80)
+                logger.warning(f"Strategy: {strategy_class.__name__ if strategy_class else 'Unknown'}")
+                logger.warning(f"Failure Reason: {review_result.get('reason', 'N/A')}")
+                logger.warning(f"Suggestion: {review_result.get('suggestion', 'N/A')}")
+                logger.warning("-" * 80)
+                logger.warning("GENERATED CODE:")
+                logger.warning("-" * 80)
+                logger.warning(code)
+                logger.warning("-" * 80)
+                logger.warning("FULL LLM REVIEW RESPONSE:")
+                logger.warning("-" * 80)
+                logger.warning(review_result.get('full_response', 'N/A'))
+                logger.warning("=" * 80)
+                
+                # Stage 1 失敗 - 寫入詳細日誌檔案
+                try:
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    strategy_name = strategy_class.__name__ if strategy_class else "Unknown"
+                    filename = f"{strategy_name}_{timestamp}_failed.txt"
+                    log_file_path = STAGE1_REVIEW_DIR / filename
+                    
+                    with open(log_file_path, 'w', encoding='utf-8') as f:
+                        f.write("=" * 80 + "\n")
+                        f.write("STAGE 1 REVIEW FAILED - DETAILED REPORT\n")
+                        f.write("=" * 80 + "\n\n")
+                        f.write(f"Strategy ID: {strategy_name}\n")
+                        f.write(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                        f.write(f"User Prompt: {prompt}\n\n")
+                        f.write("=" * 80 + "\n")
+                        f.write("FAILURE ANALYSIS\n")
+                        f.write("=" * 80 + "\n\n")
+                        f.write(f"Failure Reason:\n{review_result.get('reason', 'N/A')}\n\n")
+                        f.write(f"Suggestion:\n{review_result.get('suggestion', 'N/A')}\n\n")
+                        f.write("=" * 80 + "\n")
+                        f.write("GENERATED CODE\n")
+                        f.write("=" * 80 + "\n\n")
+                        f.write(code)
+                        f.write("\n\n")
+                        f.write("=" * 80 + "\n")
+                        f.write("FULL LLM REVIEW RESPONSE\n")
+                        f.write("=" * 80 + "\n\n")
+                        f.write(review_result.get('full_response', 'N/A'))
+                        f.write("\n")
+                        f.write("=" * 80 + "\n")
+                        f.write("END OF REPORT\n")
+                        f.write("=" * 80 + "\n")
+                    
+                    logger.info(f"Stage 1 detailed review log saved to: {log_file_path}")
+                except Exception as e:
+                    logger.error(f"Failed to write Stage 1 review log file: {e}")
             
             if not review_result["passed"]:
                 # 如果 LLM Review 失敗，不嘗試自動修復，直接返回失敗
                 # 讓用戶重新設計策略
-                logger.warning(f"Stage 1 failed: {review_result['reason'][:100]}...")
                 return {
                     "passed": False,
-                    "error": f"Stage 1 失敗: {review_result['reason'][:200]}",
+                    "error": f"Stage 1 失敗: {review_result['reason']}",
                     "attempts": attempt
                 }
             

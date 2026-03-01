@@ -12,13 +12,16 @@ def get_risk():
         risk_text = tools.get_risk_status()
         risk_status = tools.risk_mgr.get_status()
         
+        # 從 PositionManager 取得實際部位數量
+        current_position = tools.position_mgr.get_total_quantity()
+        
         return jsonify({
             "success": True,
             "data": {
                 "daily_pnl": risk_status.get("daily_pnl", 0),
                 "max_daily_loss": risk_status.get("max_daily_loss", 0),
                 "max_position": risk_status.get("max_position", 0),
-                "current_position": risk_status.get("current_position", 0),
+                "current_position": current_position,
                 "orders_this_minute": risk_status.get("orders_this_minute", 0),
                 "max_orders_per_minute": risk_status.get("max_orders_per_minute", 0),
                 "stop_loss_enabled": risk_status.get("stop_loss_enabled", True),

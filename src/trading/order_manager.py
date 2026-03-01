@@ -30,7 +30,7 @@ class OrderManager:
         action: str,
         quantity: int,
         price: float = 0,
-        price_type: str = "LMT",
+        price_type: str = "MKT",
         order_type: str = "ROD",
         reason: str = ""
     ) -> Order:

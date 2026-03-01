@@ -283,6 +283,7 @@
             <a href="/">系統總覽</a>
             <a href="/strategies/create">創建策略</a>
             <a href="/strategies">策略管理</a>
+            <a href="/orders">訂單查詢</a>
             <a href="/positions">部位查詢</a>
             <a href="/config">系統配置</a>
         </div>
@@ -393,6 +394,29 @@
         </div>
     </div>
     
+    <!-- Backtest Choice Modal -->
+    <div id="backtestChoiceModal" class="modal">
+        <div class="modal-content" style="max-width: 450px;">
+            <div class="modal-header" id="backtestChoiceTitle">📊 回測選項</div>
+            <div class="modal-body">
+                <div id="backtestChoiceMessage" style="margin-bottom: 20px; padding: 15px; background: #e8f4f8; border-left: 4px solid #2196F3; border-radius: 4px;">
+                    <!-- 動態填入 -->
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 10px;">
+                    <button class="btn btn-primary" id="viewExistingReportBtn" style="padding: 12px; font-size: 14px;">
+                        📄 查看最新回測報告
+                    </button>
+                    <button class="btn" id="runNewBacktestBtn" style="padding: 12px; font-size: 14px; background: #f5f5f5; color: #333;">
+                        🔄 執行新回測
+                    </button>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeBacktestChoiceModal()">取消</button>
+            </div>
+        </div>
+    </div>
+    
     <script>
         // Auto refresh interval (30 seconds)
         const REFRESH_INTERVAL = 30000;
@@ -412,7 +436,7 @@
                 document.getElementById('modalRisks').innerHTML = '';
             }
             
-            document.getElementById('confirmBtn').onclick = confirmCallback;
+            document.getElementById('modalConfirmBtn').onclick = confirmCallback;
             document.getElementById('confirmModal').classList.add('active');
         }
         
@@ -618,7 +642,151 @@
             });
         }
         
-        {% block extra_js %}{% endblock %}
+        // Backtest Choice Modal functions
+        var currentBacktestId = null;
+        var currentBacktestName = null;
+        var existingChartPath = null;
+        
+        function showBacktestChoiceModal(strategyId, strategyName, reportInfo) {
+            console.log('showBacktestChoiceModal 被調用');
+            console.log('strategyId:', strategyId);
+            console.log('strategyName:', strategyName);
+            console.log('reportInfo:', reportInfo);
+            console.log('reportInfo.chart_path:', reportInfo ? reportInfo.chart_path : 'reportInfo is null');
+            
+            currentBacktestId = strategyId;
+            currentBacktestName = strategyName;
+            
+            var modal = document.getElementById('backtestChoiceModal');
+            var messageDiv = document.getElementById('backtestChoiceMessage');
+            var viewBtn = document.getElementById('viewExistingReportBtn');
+            var runBtn = document.getElementById('runNewBacktestBtn');
+            
+            // 重置 existingChartPath
+            existingChartPath = null;
+            
+            if (reportInfo && reportInfo.has_report) {
+                // 有現有報告
+                existingChartPath = reportInfo.chart_path;
+                console.log('設置 existingChartPath:', existingChartPath);
+                
+                messageDiv.innerHTML = 
+                    '<strong>📊 發現現有回測報告</strong><br><br>' +
+                    '策略：<strong>' + reportInfo.strategy_name + '</strong><br>' +
+                    '版本：v' + reportInfo.version + '<br>' +
+                    '生成時間：<strong>' + reportInfo.report_time + '</strong><br>' +
+                    '<span style="color: #666;">(' + reportInfo.time_ago + ')</span><br><br>' +
+                    '您可以查看最新報告，或執行新回測（如果策略參數已修改）';
+                
+                viewBtn.style.display = 'block';
+                viewBtn.onclick = function() {
+                    // 關鍵：先保存路徑，再關閉 Modal（關閉 Modal 會清空 existingChartPath）
+                    var chartPathToShow = existingChartPath;
+                    var reportPathToShow = reportInfo ? reportInfo.report_path : null;
+                    console.log('查看報告按鈕被點擊, chartPath:', chartPathToShow, 'reportPath:', reportPathToShow);
+                    closeBacktestChoiceModal();
+                    showExistingBacktestReport(strategyName, chartPathToShow, reportPathToShow);
+                };
+            } else {
+                // 沒有現有報告
+                existingChartPath = null;
+                var version = reportInfo ? (reportInfo.version || '未知') : '未知';
+                messageDiv.innerHTML = 
+                    '<strong>📊 沒有找到回測報告</strong><br><br>' +
+                    '該策略（v' + version + '）尚沒有執行過回測。<br>' +
+                    '請點擊下方按鈕執行首次回測。';
+                
+                viewBtn.style.display = 'none';
+            }
+            
+            runBtn.onclick = function() {
+                closeBacktestChoiceModal();
+                executeBacktest(strategyId, strategyName);
+            };
+            
+            modal.classList.add('active');
+        }
+        
+        function closeBacktestChoiceModal() {
+            document.getElementById('backtestChoiceModal').classList.remove('active');
+            currentBacktestId = null;
+            currentBacktestName = null;
+            existingChartPath = null;
+        }
+        
+        function showExistingBacktestReport(strategyName, chartPath, reportPath) {
+            console.log('顯示回測報告:', strategyName, '圖表:', chartPath, '文字報告:', reportPath);
+            if (!chartPath) {
+                console.error('錯誤: chartPath 為空!');
+                alert('錯誤: 無法獲取報告路徑，請重新執行回測');
+                return;
+            }
+            showBacktestResultModal(strategyName + ' - 回測報告（' + new Date().toLocaleString() + '）');
+            document.getElementById('backtestLoading').style.display = 'none';
+            document.getElementById('backtestContent').style.display = 'block';
+            document.getElementById('backtestChart').src = chartPath;
+            
+            // 如果有文字報告，加載它
+            if (reportPath) {
+                fetch(reportPath)
+                    .then(response => response.text())
+                    .then(text => {
+                        document.getElementById('backtestReport').textContent = text;
+                        document.getElementById('backtestReport').style.color = '#333'; // 修復 2: 設置文字顏色
+                    })
+                    .catch(e => {
+                        console.error('無法加載文字報告:', e);
+                        document.getElementById('backtestReport').textContent = '⚠️ 無法加載文字分析報告，但圖表已顯示。';
+                        document.getElementById('backtestReport').style.color = '#e74c3c';
+                    });
+            } else {
+                document.getElementById('backtestReport').textContent = '此為已存在的回測報告。如需查看最新數據，請重新執行回測。';
+                document.getElementById('backtestReport').style.color = '#333'; // 修復 2: 設置文字顏色
+            }
+        }
+        
+        async function executeBacktest(strategyId, strategyName) {
+            showBacktestResultModal(strategyName + ' - 回測結果');
+            
+            try {
+                const result = await apiCall('/api/backtest/' + strategyId, 'POST');
+                if (result.success) {
+                    // 如果有報告文字，直接顯示；否則嘗試從 report_path 加載
+                    if (result.report && result.report.trim()) {
+                        updateBacktestResult(result.chart_path, result.report);
+                    } else if (result.report_path) {
+                        // 從檔案加載報告
+                        const reportUrl = result.report_path.startsWith('/') ? result.report_path : '/workspace/' + result.report_path;
+                        fetch(reportUrl)
+                            .then(r => r.text())
+                            .then(text => {
+                                updateBacktestResult(result.chart_path, text);
+                            })
+                            .catch(e => {
+                                console.error('無法加載報告檔案:', e);
+                                updateBacktestResult(result.chart_path, '(無文字報告)');
+                            });
+                    } else {
+                        updateBacktestResult(result.chart_path, '(無文字報告)');
+                    }
+                } else {
+                    showBacktestError(result.error || result.report);
+                }
+            } catch (e) {
+                showBacktestError(e.message);
+            }
+        }
+        
+        var backtestChoiceModalEl = document.getElementById('backtestChoiceModal');
+        if (backtestChoiceModalEl) {
+            backtestChoiceModalEl.addEventListener('click', function(e) {
+                if (e.target === this) {
+                    closeBacktestChoiceModal();
+                }
+            });
+        }
     </script>
+    
+    {% block extra_js %}{% endblock %}
 </body>
 </html>

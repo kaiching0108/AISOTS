@@ -73,8 +73,8 @@ class PositionManager:
         """
         # 先檢查是否已有部位
         if self.has_position(strategy_id):
-            logger.warning(f"策略 {strategy_id} 已有部位，先平倉")
-            self.close_position(strategy_id, entry_price)
+            logger.warning(f"策略 {strategy_id} 已有部位，不開新倉")
+            return None
         
         # 計算停損止盈價格（根據多空方向）
         stop_loss_price = None
@@ -147,7 +147,7 @@ class PositionManager:
         # 移除記憶體中的部位
         del self.positions[strategy_id]
         
-        logger.info(f"平倉: {position.strategy_name} - {symbol} @ {exit_price}, PnL: {position.pnl}")
+        logger.info(f"平倉: {position.strategy_name} - {position.symbol} @ {exit_price}, PnL: {position.pnl}")
         return result
     
     def update_prices(self, price_map: Dict[str, float]) -> List[Dict]:

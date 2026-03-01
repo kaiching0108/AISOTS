@@ -15,6 +15,7 @@ from src.storage.models import (
     OrderStatus,
     PositionDirection,
 )
+from src.storage.trade_log_store import TradeLogStore
 
 __all__ = [
     "JSONStore",
@@ -22,6 +23,7 @@ __all__ = [
     "PositionStore",
     "OrderStore",
     "PerformanceStore",
+    "TradeLogStore",
     "StrategyModel",
     "PositionModel",
     "OrderModel",

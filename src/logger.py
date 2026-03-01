@@ -20,7 +20,7 @@ logger.add(
 
 # 添加 file handler
 logger.add(
-    "workspace/logs/trading.log",
+    "workspace/logs/system.log",
     rotation="1 day",
     retention="30 days",
     level="DEBUG",

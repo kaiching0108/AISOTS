@@ -13,7 +13,7 @@
 | 交易 API | Shioaji (永豐期貨) |
 | 程式語言 | Python 3.10+ |
 | AI Agent | Nanobot 架構概念 |
-| LLM | OpenRouter / OpenAI / Anthropic / DeepSeek / Ollama (本地) |
+| LLM | OpenRouter / OpenAI / Anthropic / Ollama (本地) |
 | 技術指標 | pandas_ta |
 | 通知 | Telegram Bot |
 | 資料儲存 | JSON 檔案 |
@@ -37,8 +37,8 @@
 │  │  Trading Tools  │  │ System Prompt   │  │  LLM Provider   │    │
 │  │  - place_order  │  │                 │  │                 │    │
 │  │  - get_position│  │  交易規則       │  │  GPT/Claude     │    │
-│  │  - get_perform │  │ 策略定義       │  │  DeepSeek       │    │
-│  │  - 自動生成ID  │  │ 對話歷史       │  │  Ollama         │    │
+│  │  - get_perform │  │ 策略定義       │  │  Ollama         │    │
+│  │  - 自動生成ID  │  │ 對話歷史       │  │                 │    │
 │  └─────────────────┘  └─────────────────┘  └─────────────────┘    │
 └─────────────────────────────────────────────────────────────────────┘
                                   │
@@ -69,7 +69,7 @@
 │  │  Trading Tools  │  │ System Prompt   │  │  LLM Provider   │    │
 │  │  - place_order  │  │                 │  │                 │    │
 │  │  - get_position│  │  交易規則       │  │  GPT/Claude     │    │
-│  │  - get_perform │  │  策略定義       │  │  DeepSeek       │    │
+│  │  - get_perform │  │  策略定義       │  │  Ollama         │    │
 │  └─────────────────┘  └─────────────────┘  └─────────────────┘    │
 └─────────────────────────────────────────────────────────────────────┘
                                   │
@@ -280,7 +280,7 @@ User Command
 |------|------|
 | `tools.py` | AI Agent 交易工具集 (含策略管理工具) |
 | `prompts.py` | 系統提示詞 |
-| `providers.py` | LLM 提供者 (Ollama/OpenAI/Anthropic/DeepSeek/OpenRouter) |
+| `providers.py` | LLM 提供者 (Ollama/OpenAI/Anthropic/OpenRouter) |
 
 #### Agent Tools 一覽
 
@@ -933,6 +933,13 @@ cerebro.addanalyzer(bt.analyzers.AnnualReturn, _name='annual_return')
 | 3.8.0 | 2026-02 | 新增 BacktestEngine 歷史回測系統 |
 | 3.9.0 | 2026-02 | 新增回測圖表生成與 Telegram 圖片發送功能 |
 | 3.10.0 | 2026-02 | 新增 delete 指令與回測圖片清理功能 |
+| **3.11.0** | **2026-03** | **新增交易日誌系統（TradeLogStore），支援重要交易訊息顯示與過濾** |
+| **3.12.0** | **2026-03** | **系統日誌重命名：trading.log → system.log，統一平倉流程** |
+| **3.13.0** | **2026-03** | **訂單查詢頁面新增原因欄位，風控狀態顯示實際部位數量** |
+| **3.14.0** | **2026-03** | **停損檢查統一使用 strategy_runner 市場數據，確保與策略決策價格一致** |
+| **3.15.0** | **2026-03** | **刪除策略時連帶刪除 backtests 目錄下所有相關檔案** |
+| **3.16.0** | **2026-03** | **模擬合約價格統一：get_contract() 與 MockTrade.filled_price 都使用 strategy_runner 動態價格，解決下單成交價固定問題** |
+| **3.17.0** | **2026-03** | **模擬價格統一化：回測K線(_generate_mock_kbars)與實時交易(_simulate_price_updates)統一使用 ShioajiClient.TIMEFRAME_VOLATILITY，根據策略 timeframe 自動調整波動率(1m:0.03%~1d:1.2%)** |
 
 ---
 

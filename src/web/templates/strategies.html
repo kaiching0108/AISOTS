@@ -25,6 +25,7 @@
 {% endblock %}
 
 {% block extra_js %}
+<script>
     // 策略卡片 HTML 生成函數
     function generateStrategyCard(s) {
         return `
@@ -121,6 +122,23 @@
     
     async function enableStrategy(id) {
         const result = await apiCall('/api/strategies/' + id + '/enable', 'POST');
+        
+        // 檢查是否需要確認（舊策略有部位）
+        if (result.needs_confirmation) {
+            showModal(
+                result.title,
+                result.message,
+                result.risks,
+                async () => {
+                    const confirmResult = await apiCall('/api/strategies/' + id + '/enable', 'DELETE');
+                    closeModal();
+                    alert(confirmResult.message);
+                    loadStrategies();
+                }
+            );
+            return;
+        }
+        
         alert(result.message);
         loadStrategies();
     }
@@ -178,21 +196,23 @@
     }
     
     async function runBacktest(id, strategyName) {
-        showSimpleConfirmModal('執行回測', '確定要執行回測嗎？', async function() {
-            closeSimpleConfirmModal();
-            showBacktestResultModal(strategyName + ' - 回測結果');
+        try {
+            // 第一步：檢查是否存在最新回測報告
+            console.log('正在檢查回測報告...', id);
+            const checkResult = await apiCall('/api/backtest/' + id + '/check', 'GET');
+            console.log('API 返回:', checkResult);
             
-            try {
-                const result = await apiCall('/api/backtest/' + id, 'POST');
-                if (result.success) {
-                    updateBacktestResult(result.chart_path, result.report);
-                } else {
-                    showBacktestError(result.error || result.report);
-                }
-            } catch (e) {
-                showBacktestError(e.message);
+            // 第二步：顯示選擇 Modal
+            if (!checkResult.chart_path) {
+                console.warn('警告: chart_path 為空');
             }
-        });
+            showBacktestChoiceModal(id, strategyName, checkResult);
+            
+        } catch (e) {
+            console.error('檢查回測報告時發生錯誤:', e);
+            // 如果檢查失敗，直接執行回測
+            executeBacktest(id, strategyName);
+        }
     }
     
     async function viewCode(id) {
@@ -232,5 +252,5 @@
     
     loadStrategies();
     setInterval(loadStrategies, REFRESH_INTERVAL);
-    </script>
+</script>
 {% endblock %}

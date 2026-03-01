@@ -14,65 +14,97 @@ WORKSPACE_DIR = Path("workspace")
 BACKTEST_DIR = WORKSPACE_DIR / "backtests"
 
 
-def extract_indicators_from_code(code: str) -> Dict[str, bool]:
-    """從策略代碼中提取需要計算的指標
+def extract_indicators_from_code(code: str) -> Dict[str, Any]:
+    """從策略代碼中提取需要計算的指標及其參數
     
     Args:
         code: 策略程式碼
         
     Returns:
-        Dict: 需要計算的指標字典
+        Dict: 需要計算的指標字典，包含指標類型和參數
+        例如: {'sma': {'periods': [5, 10]}, 'rsi': {'period': 14}}
     """
     indicators = {
-        'rsi': False,
-        'macd': False,
-        'sma': False,
-        'ema': False,
-        'bb': False,
-        'atr': False,
-        'adx': False,
-        'stoch': False,
-        'cci': False,
+        'rsi': None,
+        'macd': None,
+        'sma': None,
+        'ema': None,
+        'bb': None,
+        'atr': None,
+        'adx': None,
+        'stoch': None,
+        'cci': None,
     }
     
     code_upper = code.upper()
     
+    # RSI - 提取週期參數
     if 'RSI' in code_upper:
-        indicators['rsi'] = True
+        rsi_match = re.search(r'RSI.*?(?:period|length)?[=:]\s*(\d+)', code, re.IGNORECASE)
+        indicators['rsi'] = {'period': int(rsi_match.group(1))} if rsi_match else {'period': 14}
     
+    # MACD - 提取標準參數或預設值
     if 'MACD' in code_upper:
-        indicators['macd'] = True
+        macd_match = re.search(r'MACD.*?(?:fast|short)?[=:]\s*(\d+).*?(?:slow|long)?[=:]\s*(\d+).*?(?:signal)?[=:]\s*(\d+)', code, re.IGNORECASE)
+        if macd_match:
+            indicators['macd'] = {
+                'fast': int(macd_match.group(1)),
+                'slow': int(macd_match.group(2)),
+                'signal': int(macd_match.group(3))
+            }
+        else:
+            indicators['macd'] = {'fast': 12, 'slow': 26, 'signal': 9}
     
+    # SMA - 提取所有週期參數
     if re.search(r'SMA|均線', code, re.IGNORECASE):
-        indicators['sma'] = True
+        sma_periods = re.findall(r'SMA.*?(?:period|length)?[=:]\s*(\d+)', code, re.IGNORECASE)
+        if sma_periods:
+            indicators['sma'] = {'periods': [int(p) for p in sma_periods]}
+        else:
+            indicators['sma'] = {'periods': [20, 30, 60]}  # 預設值
     
+    # EMA - 提取所有週期參數
     if 'EMA' in code_upper:
-        indicators['ema'] = True
+        ema_periods = re.findall(r'EMA.*?(?:period|length)?[=:]\s*(\d+)', code, re.IGNORECASE)
+        if ema_periods:
+            indicators['ema'] = {'periods': [int(p) for p in ema_periods]}
+        else:
+            indicators['ema'] = {'periods': [20, 30, 60]}  # 預設值
     
+    # BB - 布林帶
     if re.search(r'BB|BOLL|布林', code, re.IGNORECASE):
-        indicators['bb'] = True
+        bb_match = re.search(r'(?:BB|BOLL|布林).*?(?:period|length)?[=:]\s*(\d+)', code, re.IGNORECASE)
+        indicators['bb'] = {'period': int(bb_match.group(1))} if bb_match else {'period': 20}
     
+    # ATR
     if 'ATR' in code_upper:
-        indicators['atr'] = True
+        atr_match = re.search(r'ATR.*?(?:period|length)?[=:]\s*(\d+)', code, re.IGNORECASE)
+        indicators['atr'] = {'period': int(atr_match.group(1))} if atr_match else {'period': 14}
     
+    # ADX
     if 'ADX' in code_upper:
-        indicators['adx'] = True
+        adx_match = re.search(r'ADX.*?(?:period|length)?[=:]\s*(\d+)', code, re.IGNORECASE)
+        indicators['adx'] = {'period': int(adx_match.group(1))} if adx_match else {'period': 14}
     
+    # STOCH/KD
     if re.search(r'STOCH|KD', code, re.IGNORECASE):
-        indicators['stoch'] = True
+        stoch_match = re.search(r'(?:STOCH|KD).*?(?:period|length|k)?[=:]\s*(\d+)', code, re.IGNORECASE)
+        indicators['stoch'] = {'period': int(stoch_match.group(1))} if stoch_match else {'period': 14}
     
+    # CCI
     if 'CCI' in code_upper:
-        indicators['cci'] = True
+        cci_match = re.search(r'CCI.*?(?:period|length)?[=:]\s*(\d+)', code, re.IGNORECASE)
+        indicators['cci'] = {'period': int(cci_match.group(1))} if cci_match else {'period': 20}
     
     return indicators
 
 
-def calculate_indicators(df: pd.DataFrame, indicators: Dict[str, bool]) -> pd.DataFrame:
-    """根據指標需求計算指標
+def calculate_indicators(df: pd.DataFrame, indicators: Dict[str, Any]) -> pd.DataFrame:
+    """根據指標需求計算指標，使用從策略代碼提取的參數
     
     Args:
         df: 包含 OHLCV 的 DataFrame
-        indicators: 需要計算的指標字典
+        indicators: 需要計算的指標字典，包含參數
         
     Returns:
         DataFrame: 包含計算後指標的 DataFrame
@@ -82,47 +114,76 @@ def calculate_indicators(df: pd.DataFrame, indicators: Dict[str, bool]) -> pd.Da
     low = df['Low']
     volume = df['Volume']
     
+    # RSI - 使用提取的週期參數
     if indicators.get('rsi'):
-        df['rsi'] = ta.rsi(close, length=14)
+        period = indicators['rsi'].get('period', 14)
+        df[f'rsi_{period}'] = ta.rsi(close, length=period)
+        df['rsi'] = df[f'rsi_{period}']  # 預設欄位名
     
+    # MACD - 使用提取的參數
     if indicators.get('macd'):
-        macd = ta.macd(close)
+        params = indicators['macd']
+        fast = params.get('fast', 12)
+        slow = params.get('slow', 26)
+        signal = params.get('signal', 9)
+        macd = ta.macd(close, fast=fast, slow=slow, signal=signal)
         if macd is not None:
-            df['macd'] = macd['MACD_12_26_9']
-            df['macd_signal'] = macd['MACDs_12_26_9']
-            df['macd_hist'] = macd['MACDh_12_26_9']
+            df['macd'] = macd[f'MACD_{fast}_{slow}_{signal}']
+            df['macd_signal'] = macd[f'MACDs_{fast}_{slow}_{signal}']
+            df['macd_hist'] = macd[f'MACDh_{fast}_{slow}_{signal}']
     
+    # SMA - 使用提取的所有週期參數
     if indicators.get('sma'):
-        df['sma20'] = ta.sma(close, length=20)
-        df['sma30'] = ta.sma(close, length=30)
-        df['sma60'] = ta.sma(close, length=60)
+        periods = indicators['sma'].get('periods', [20, 30, 60])
+        for period in periods:
+            df[f'sma{period}'] = ta.sma(close, length=period)
     
+    # EMA - 使用提取的所有週期參數
     if indicators.get('ema'):
-        df['ema20'] = ta.ema(close, length=20)
-        df['ema30'] = ta.ema(close, length=30)
-        df['ema60'] = ta.ema(close, length=60)
+        periods = indicators['ema'].get('periods', [20, 30, 60])
+        for period in periods:
+            df[f'ema{period}'] = ta.ema(close, length=period)
     
+    # BB - 布林帶
     if indicators.get('bb'):
-        bbands = ta.bbands(close, length=20)
+        period = indicators['bb'].get('period', 20)
+        bbands = ta.bbands(close, length=period)
         if bbands is not None:
-            df['bb_upper'] = bbands['BBU_20_2.0']
-            df['bb_mid'] = bbands['BBM_20_2.0']
-            df['bb_lower'] = bbands['BBL_20_2.0']
+            df[f'bb_upper_{period}'] = bbands[f'BBU_{period}_2.0']
+            df[f'bb_mid_{period}'] = bbands[f'BBM_{period}_2.0']
+            df[f'bb_lower_{period}'] = bbands[f'BBL_{period}_2.0']
+            # 預設欄位名（向後相容）
+            df['bb_upper'] = df[f'bb_upper_{period}']
+            df['bb_mid'] = df[f'bb_mid_{period}']
+            df['bb_lower'] = df[f'bb_lower_{period}']
     
+    # ATR
     if indicators.get('atr'):
-        df['atr'] = ta.atr(high, low, close, length=14)
+        period = indicators['atr'].get('period', 14)
+        df[f'atr_{period}'] = ta.atr(high, low, close, length=period)
+        df['atr'] = df[f'atr_{period}']
     
+    # ADX
     if indicators.get('adx'):
-        df['adx'] = ta.adx(high, low, close, length=14)
+        period = indicators['adx'].get('period', 14)
+        df[f'adx_{period}'] = ta.adx(high, low, close, length=period)
+        df['adx'] = df[f'adx_{period}']
     
+    # STOCH/KD
     if indicators.get('stoch'):
-        stoch = ta.stoch(high, low, close)
+        period = indicators['stoch'].get('period', 14)
+        stoch = ta.stoch(high, low, close, k=period)
         if stoch is not None:
-            df['stoch_k'] = stoch['STOCHk_14_3_3']
-            df['stoch_d'] = stoch['STOCHd_14_3_3']
+            df[f'stoch_k_{period}'] = stoch[f'STOCHk_{period}_3_3']
+            df[f'stoch_d_{period}'] = stoch[f'STOCHd_{period}_3_3']
+            df['stoch_k'] = df[f'stoch_k_{period}']
+            df['stoch_d'] = df[f'stoch_d_{period}']
     
+    # CCI
     if indicators.get('cci'):
-        df['cci'] = ta.cci(high, low, close, length=20)
+        period = indicators['cci'].get('period', 20)
+        df[f'cci_{period}'] = ta.cci(high, low, close, length=period)
+        df['cci'] = df[f'cci_{period}']
     
     return df
 
@@ -173,108 +234,171 @@ class BacktestEngine:
         """
         return self.TIMEFRAME_CONFIG.get(timeframe, (30, "1個月"))
     
-    def _create_strategy_class(self, strategy_code: str, indicators_dict: Dict[str, pd.Series]):
-        """根據策略代碼和指標創建 backtesting.py 策略類別
+    def _create_strategy_class(self, strategy_code: str, class_name: str, df: pd.DataFrame):
+        """創建 backtesting.py 策略類別 - 實時計算指標（與實盤一致）
         
         Args:
             strategy_code: 策略程式碼
-            indicators_dict: 指標字典
+            class_name: 策略類別名稱
+            df: OHLCV DataFrame（用於設置數據結構）
             
         Returns:
             Strategy class
         """
         from backtesting import Strategy
+        from src.engine.framework import TradingStrategy, BarData
+        import pandas_ta as ta_module
         
-        # 提取關鍵邏輯
-        has_rsi = indicators_dict.get('rsi') is not None
-        has_macd = indicators_dict.get('macd') is not None
-        has_sma = indicators_dict.get('sma20') is not None
-        has_bb = indicators_dict.get('bb_upper') is not None
+        # 編譯策略代碼
+        strategy_namespace = {}
+        try:
+            exec_globals = {
+                'TradingStrategy': TradingStrategy,
+                'BarData': BarData,
+                'pd': pd,
+                'ta': ta_module,
+                'Optional': Optional,
+                'logger': logger,
+            }
+            exec(strategy_code, exec_globals, strategy_namespace)
+            
+            # 獲取策略類別
+            StrategyClass = strategy_namespace.get(class_name)
+            if not StrategyClass:
+                for name, obj in strategy_namespace.items():
+                    if isinstance(obj, type) and issubclass(obj, TradingStrategy):
+                        StrategyClass = obj
+                        logger.info(f"找到策略類別: {name}")
+                        break
+            
+            if not StrategyClass:
+                raise ValueError(f"找不到策略類別: {class_name}")
+                
+        except Exception as e:
+            logger.error(f"編譯策略代碼失敗: {e}")
+            raise
         
-        # 根據策略代碼判斷訊號邏輯
-        code_lower = strategy_code.lower()
-        
-        class GeneratedStrategy(Strategy):
+        class BacktestWrapper(Strategy):
+            """包裝器：讓策略實時計算指標，與實盤行為完全一致"""
+            
             def init(self):
-                # 綁定預先計算的指標
-                if has_rsi:
-                    self.rsi = self.I(lambda: indicators_dict['rsi'])
-                if has_macd:
-                    self.macd = self.I(lambda: indicators_dict['macd'])
-                    self.macd_signal = self.I(lambda: indicators_dict['macd_signal'])
-                if has_sma:
-                    self.sma20 = self.I(lambda: indicators_dict['sma20'])
-                    self.sma30 = self.I(lambda: indicators_dict['sma30'])
-                    self.sma60 = self.I(lambda: indicators_dict['sma60'])
-                if has_bb:
-                    self.bb_upper = self.I(lambda: indicators_dict['bb_upper'])
-                    self.bb_mid = self.I(lambda: indicators_dict['bb_mid'])
-                    self.bb_lower = self.I(lambda: indicators_dict['bb_lower'])
+                """初始化策略實例"""
+                symbol = getattr(self.data, 'symbol', 'TMF')
+                self._strategy_instance = StrategyClass(symbol)
+                self._strategy_instance._bars = []
+                self._strategy_instance._df_cache = None
+                
+                # 獲取總 K 線數量
+                self._total_bars = len(self.data.Close)
+                
+                logger.info(f"策略實例已初始化: {StrategyClass.__name__}, 總 K 線數: {self._total_bars}")
             
             def next(self):
-                # 根據策略代碼中的邏輯生成訊號
+                """每個 K 線調用 - 執行策略邏輯"""
+                # 獲取當前索引（從 0 開始）
+                current_idx = len(self.data.Close) - 1
+                
+                # 創建 BarData
+                bar = BarData(
+                    timestamp=pd.Timestamp.now(),
+                    symbol=self._strategy_instance.symbol,
+                    open=self.data.Open[-1],
+                    high=self.data.High[-1],
+                    low=self.data.Low[-1],
+                    close=self.data.Close[-1],
+                    volume=self.data.Volume[-1]
+                )
+                
+                # 添加到歷史
+                self._strategy_instance._bars.append(bar)
+                
+                # 關鍵：更新 DataFrame 緩存，包含從頭到當前的所有 K 線
+                # 這樣 ta() 方法就能看到完整的歷史數據
+                self._update_dataframe_cache(current_idx)
+                
+                # 詳細日誌：記錄當前 K 線狀態
+                log_prefix = f"[K線 {current_idx}/{self._total_bars}]"
+                
+                # 嘗試獲取指標值用於日誌
+                try:
+                    sma5 = self._strategy_instance.ta('SMA', period=5)
+                    sma10 = self._strategy_instance.ta('SMA', period=10)
+                    if sma5 is not None and sma10 is not None and len(sma5) >= 2 and len(sma10) >= 2:
+                        sma5_curr = sma5.iloc[-1]
+                        sma5_prev = sma5.iloc[-2]
+                        sma10_curr = sma10.iloc[-1]
+                        sma10_prev = sma10.iloc[-2]
+                        logger.debug(f"{log_prefix} 指標: sma5={sma5_curr:.2f}({sma5_prev:.2f}), sma10={sma10_curr:.2f}({sma10_prev:.2f})")
+                    else:
+                        logger.debug(f"{log_prefix} 指標: sma5 or sma10 is None or insufficient data")
+                except Exception as e:
+                    logger.debug(f"{log_prefix} 指標計算錯誤: {e}")
+                
+                # 執行策略
+                try:
+                    signal = self._strategy_instance.on_bar(bar)
+                    logger.debug(f"{log_prefix} 策略返回訊號: {signal}, position={self._strategy_instance.position}")
+                except Exception as e:
+                    logger.error(f"{log_prefix} 策略執行錯誤: {e}")
+                    import traceback
+                    logger.error(traceback.format_exc())
+                    signal = 'hold'
+                
+                # 執行交易
                 position = 0
                 if self.position:
                     position = 1 if self.position.size > 0 else -1
                 
-                signal = self._generate_signal(position)
+                # 關鍵：同步 backtesting.py 的倉位到策略實例
+                # 這樣策略的 on_bar 方法才能正確檢查 self.position
+                self._strategy_instance.position = position
                 
+                # 詳細日誌：交易決策
                 if signal == 'buy' and position == 0:
                     self.buy()
+                    self._strategy_instance.position = 1  # 立即同步
+                    logger.info(f"{log_prefix} ✅ 執行 BUY @ {bar.close}")
                 elif signal == 'sell' and position == 0:
                     self.sell()
+                    self._strategy_instance.position = -1  # 立即同步
+                    logger.info(f"{log_prefix} ✅ 執行 SELL @ {bar.close}")
                 elif signal == 'close' and position != 0:
                     self.position.close()
+                    self._strategy_instance.position = 0  # 立即同步
+                    logger.info(f"{log_prefix} ✅ 執行 CLOSE @ {bar.close}")
+                elif signal in ['buy', 'sell', 'close']:
+                    logger.debug(f"{log_prefix} ⚠️ 訊號 {signal} 被忽略 (position={position})")
+                else:
+                    logger.debug(f"{log_prefix} ➖ HOLD (無訊號)")
+            
+            def _update_dataframe_cache(self, current_idx: int):
+                """更新 DataFrame 緩存 - 包含從 0 到 current_idx 的所有 K 線"""
+                # 從 backtesting.py 的數據結構重建 DataFrame
+                # 注意：這裡使用完整的歷史，不是只有當前 K 線
+                
+                # 獲取從頭到當前的所有數據
+                full_open = list(self.data.Open)[:current_idx + 1]
+                full_high = list(self.data.High)[:current_idx + 1]
+                full_low = list(self.data.Low)[:current_idx + 1]
+                full_close = list(self.data.Close)[:current_idx + 1]
+                full_volume = list(self.data.Volume)[:current_idx + 1]
+                
+                # 創建 DataFrame
+                df = pd.DataFrame({
+                    'open': full_open,
+                    'high': full_high,
+                    'low': full_low,
+                    'close': full_close,
+                    'volume': full_volume,
+                })
+                
+                self._strategy_instance._df_cache = df
+                
+                # 日誌（每 100 根 K 線記錄一次）
+                if current_idx % 100 == 0:
+                    logger.debug(f"DataFrame 已更新: {len(df)} 根 K 線")
         
-        #訊 添加號生成邏輯
-        def generate_signal(self, position):
-            # RSI 策略邏輯
-            if has_rsi and hasattr(self, 'rsi'):
-                rsi_val = self.rsi[-1]
-                if pd.notna(rsi_val):
-                    if rsi_val < 30 and position == 0:
-                        return 'buy'
-                    elif rsi_val > 70 and position > 0:
-                        return 'close'
-            
-            # MACD 策略邏輯
-            if has_macd and hasattr(self, 'macd') and hasattr(self, 'macd_signal'):
-                macd_val = self.macd[-1]
-                signal_val = self.macd_signal[-1]
-                if pd.notna(macd_val) and pd.notna(signal_val):
-                    # 金叉
-                    if macd_val > signal_val and position == 0:
-                        return 'buy'
-                    # 死叉
-                    elif macd_val < signal_val and position > 0:
-                        return 'close'
-            
-            # SMA 策略邏輯
-            if has_sma and hasattr(self, 'sma20') and hasattr(self, 'sma60'):
-                sma20 = self.sma20[-1]
-                sma60 = self.sma60[-1]
-                if pd.notna(sma20) and pd.notna(sma60):
-                    if sma20 > sma60 and position == 0:
-                        return 'buy'
-                    elif sma20 < sma60 and position > 0:
-                        return 'close'
-            
-            # 布林帶策略邏輯
-            if has_bb and hasattr(self, 'bb_lower') and hasattr(self, 'bb_upper'):
-                close_price = self.data.Close[-1]
-                bb_lower = self.bb_lower[-1]
-                bb_upper = self.bb_upper[-1]
-                if pd.notna(bb_lower) and pd.notna(bb_upper):
-                    if close_price < bb_lower and position == 0:
-                        return 'buy'
-                    elif close_price > bb_upper and position > 0:
-                        return 'close'
-            
-            return 'hold'
-        
-        GeneratedStrategy._generate_signal = generate_signal
-        
-        return GeneratedStrategy
+        return BacktestWrapper
     
     async def run_backtest(
         self,
@@ -365,26 +489,12 @@ class BacktestEngine:
                 'Volume': [float(x) for x in kbars_data['volume']],
             })
             
-            indicators_requested = extract_indicators_from_code(strategy_code)
-            df = calculate_indicators(df, indicators_requested)
+            # 不再預計算指標！策略會在回測過程中實時計算
+            # 這樣確保回測結果與實盤運行完全一致
+            logger.info(f"回測數據準備完成: {len(df)} 根 K 線，策略將實時計算指標")
             
-            # 準備指標字典
-            indicators_dict = {}
-            if indicators_requested.get('rsi') and 'rsi' in df.columns:
-                indicators_dict['rsi'] = df['rsi'].values
-            if indicators_requested.get('macd'):
-                indicators_dict['macd'] = df['macd'].values if 'macd' in df.columns else df['Close'].values
-                indicators_dict['macd_signal'] = df['macd_signal'].values if 'macd_signal' in df.columns else df['Close'].values
-            if indicators_requested.get('sma'):
-                indicators_dict['sma20'] = df['sma20'].values if 'sma20' in df.columns else df['Close'].values
-                indicators_dict['sma30'] = df['sma30'].values if 'sma30' in df.columns else df['Close'].values
-                indicators_dict['sma60'] = df['sma60'].values if 'sma60' in df.columns else df['Close'].values
-            if indicators_requested.get('bb'):
-                indicators_dict['bb_upper'] = df['bb_upper'].values if 'bb_upper' in df.columns else df['Close'].values
-                indicators_dict['bb_mid'] = df['bb_mid'].values if 'bb_mid' in df.columns else df['Close'].values
-                indicators_dict['bb_lower'] = df['bb_lower'].values if 'bb_lower' in df.columns else df['Close'].values
-            
-            strategy_class = self._create_strategy_class(strategy_code, indicators_dict)
+            # 創建策略類別 - 實時計算指標模式
+            strategy_class = self._create_strategy_class(strategy_code, class_name, df)
             
             bt = Backtest(
                 df, 
@@ -397,23 +507,17 @@ class BacktestEngine:
             stats = bt.run()
             
             chart_path = None
+            report_path = None
+            base_filename = None
+            
+            # 準備檔名（等 report 生成後再保存）
             if strategy_id and strategy_version:
                 try:
                     BACKTEST_DIR.mkdir(parents=True, exist_ok=True)
                     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-                    filename = f"{strategy_id}_v{strategy_version}_{timestamp}.html"
-                    chart_path = BACKTEST_DIR / filename
-                    
-                    # 生成交互式 HTML 圖表
-                    bt.plot(
-                        filename=str(chart_path),
-                        open_browser=False
-                    )
-                    
-                    logger.info(f"Chart saved to: {chart_path}")
+                    base_filename = f"{strategy_id}_v{strategy_version}_{timestamp}"
                 except Exception as e:
-                    logger.warning(f"Failed to generate chart: {e}")
-                    chart_path = None
+                    logger.warning(f"Failed to prepare save paths: {e}")
             
             total_return = stats.get('Return [%]', 0) or 0
             sharpe = stats.get('Sharpe Ratio', 0) or 0
@@ -421,8 +525,10 @@ class BacktestEngine:
             trade_count = stats.get('# Trades', 0) or 0
             win_rate = stats.get('Win Rate [%]', 0) or 0
             
-            # 計算總損益（乘以合約乘數）
-            total_pnl = initial_capital * total_return / 100 * contract_multiplier
+            # 計算總損益（正確方法：使用 Equity 曲線）
+            # backtesting.py 已經處理了實際權益和交易盈虧
+            equity_final = stats.get('Equity Final [$]', initial_capital)
+            total_pnl = equity_final - initial_capital
             
             # 計算固定手續費（大台/小台/微台）
             fixed_commission_map = {
@@ -433,7 +539,8 @@ class BacktestEngine:
             commission_per_trade = fixed_commission_map.get(symbol, 0)
             total_commission = trade_count * 2 * commission_per_trade  # 開倉+平倉
             
-            # 淨損益 = 總損益 - 手續費
+            # 淨損益 = 總損益 - 手續費（手續費已經包含在 total_pnl 中，這裡是額外計算）
+            # 注意：如果回測 commission 參數不為0，手續費已扣除，這裡是額外固定手續費
             net_pnl = total_pnl - total_commission
             
             sqn = 0
@@ -446,11 +553,23 @@ class BacktestEngine:
             won_trades = int(trade_count * win_rate / 100) if trade_count > 0 else 0
             lost_trades = trade_count - won_trades
             
+            # 計算 Profit Factor（正確方法：從交易記錄計算）
+            # Profit Factor = 總盈利金額 / 總虧損金額絕對值
             profit_factor = 0.0
-            if won_trades > 0 and lost_trades > 0:
-                avg_win = total_pnl / won_trades if won_trades > 0 else 0
-                avg_loss = abs(total_pnl / lost_trades) if lost_trades > 0 else 1
-                profit_factor = avg_win / avg_loss if avg_loss > 0 else 0
+            if trade_count > 0 and hasattr(stats, '_trades') and len(stats._trades) > 0:
+                trades_df = stats._trades
+                # 獲取已完成交易的盈虧
+                if 'PnL' in trades_df.columns:
+                    winning_trades = trades_df[trades_df['PnL'] > 0]
+                    losing_trades = trades_df[trades_df['PnL'] < 0]
+                    
+                    total_wins = winning_trades['PnL'].sum() if len(winning_trades) > 0 else 0
+                    total_losses = abs(losing_trades['PnL'].sum()) if len(losing_trades) > 0 else 0
+                    
+                    if total_losses > 0:
+                        profit_factor = total_wins / total_losses
+                    elif total_wins > 0:
+                        profit_factor = float('inf')  # 只有盈利，無虧損
             
             avg_trade = total_pnl / trade_count if trade_count > 0 else 0
             
@@ -484,13 +603,54 @@ class BacktestEngine:
                 stats=stats
             )
             
+            # 保存圖表和文字報告
+            if base_filename:
+                try:
+                    # 保存 HTML 圖表
+                    chart_path = BACKTEST_DIR / f"{base_filename}.html"
+                    bt.plot(
+                        filename=str(chart_path),
+                        open_browser=False
+                    )
+                    logger.info(f"Chart saved to: {chart_path}")
+                    
+                    # 保存文字報告
+                    report_path = BACKTEST_DIR / f"{base_filename}.txt"
+                    with open(report_path, 'w', encoding='utf-8') as f:
+                        f.write(report)
+                    logger.info(f"Report saved to: {report_path}")
+                    
+                except Exception as e:
+                    logger.warning(f"Failed to save files: {e}")
+                    chart_path = None
+                    report_path = None
+            
             logger.info(f"Backtest completed: {trade_count} trades, return: {total_return:.2f}%")
+            
+            # 轉換為相對路徑（從 workspace 目錄開始）
+            chart_path_rel = None
+            if chart_path:
+                # 從絕對路徑中提取 workspace 之後的部分
+                chart_path_str = str(chart_path).replace("\\", "/")
+                if "workspace/" in chart_path_str:
+                    chart_path_rel = chart_path_str.split("workspace/", 1)[1]
+                else:
+                    chart_path_rel = str(chart_path.name)
+            
+            report_path_rel = None
+            if report_path:
+                report_path_str = str(report_path).replace("\\", "/")
+                if "workspace/" in report_path_str:
+                    report_path_rel = report_path_str.split("workspace/", 1)[1]
+                else:
+                    report_path_rel = str(report_path.name)
             
             return {
                 "passed": True,
                 "report": report,
                 "metrics": metrics,
-                "chart_path": str(chart_path) if chart_path else None,
+                "chart_path": chart_path_rel,
+                "report_path": report_path_rel,
                 "analysis": analysis,
                 "error": None,
             }

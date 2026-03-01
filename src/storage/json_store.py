@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 from typing import Any, Optional, List
 from datetime import datetime
+from src.logger import logger
 
 
 class JSONStore:
@@ -29,10 +30,15 @@ class JSONStore:
     
     def save(self, filename: str, data: Any) -> None:
         """儲存 JSON 檔案"""
-        path = self._get_file_path(filename)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2, default=str)
+        try:
+            path = self._get_file_path(filename)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2, default=str)
+            logger.info(f"✅ 檔案儲存成功: {filename}")
+        except Exception as e:
+            logger.error(f"❌ 檔案儲存失敗: {filename}, error: {e}")
+            raise  # 重新拋出例外，讓上層知道儲存失敗
     
     def append(self, filename: str, item: dict) -> None:
         """追加資料到 JSON 陣列"""
@@ -256,10 +262,10 @@ class StrategyStore(JSONStore):
                 f.unlink()
                 deleted = True
         
-        # 刪除回測圖片（所有版本）
+        # 刪除回測檔案（所有版本、所有類型）
         backtest_dir = self.workspace / "backtests"
         if backtest_dir.exists():
-            for f in backtest_dir.glob(f"{strategy_id}_v*.png"):
+            for f in backtest_dir.glob(f"{strategy_id}_v*"):
                 f.unlink()
                 deleted = True
         
@@ -297,11 +303,22 @@ class PositionStore(JSONStore):
     
     def add_position(self, position: dict) -> None:
         """新增部位"""
-        strategy_id = position.get("strategy_id", "")
-        filename = f"positions/{strategy_id}_positions.json"
-        positions = self.load(filename, [])
-        positions.append(position)
-        self.save(filename, positions)
+        try:
+            strategy_id = position.get("strategy_id", "")
+            if not strategy_id:
+                logger.error("❌ 新增部位失敗: strategy_id 為空")
+                raise ValueError("strategy_id cannot be empty")
+            
+            filename = f"positions/{strategy_id}_positions.json"
+            positions = self.load(filename, [])
+            if not isinstance(positions, list):
+                positions = []
+            positions.append(position)
+            self.save(filename, positions)
+            logger.info(f"✅ 部位已儲存: {strategy_id}, quantity: {position.get('quantity', 0)}")
+        except Exception as e:
+            logger.error(f"❌ 新增部位失敗: {position.get('strategy_id', 'unknown')}, error: {e}")
+            raise
     
     def close_position(self, strategy_id: str) -> bool:
         """平倉"""
@@ -356,6 +373,11 @@ class OrderStore(JSONStore):
         today = datetime.now().strftime("%Y-%m-%d")
         all_orders = self.get_all_orders()
         return [o for o in all_orders if today in o.get("timestamp", "")]
+    
+    def get_by_date(self, date: str) -> List[dict]:
+        """取得指定日期的訂單"""
+        all_orders = self.get_all_orders()
+        return [o for o in all_orders if date in o.get("timestamp", "")]
     
     def add_order(self, order: dict) -> None:
         """新增訂單"""

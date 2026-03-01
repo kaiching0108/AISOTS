@@ -7,7 +7,6 @@ from src.agent.providers import (
     OpenRouterProvider,
     OpenAIProvider,
     AnthropicProvider,
-    DeepSeekProvider,
     ProviderFactory,
     create_llm_provider,
 )
@@ -21,7 +20,6 @@ __all__ = [
     "OpenRouterProvider",
     "OpenAIProvider",
     "AnthropicProvider",
-    "DeepSeekProvider",
     "ProviderFactory",
     "create_llm_provider",
 ]

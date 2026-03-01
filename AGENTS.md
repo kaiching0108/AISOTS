@@ -1,6 +1,6 @@
 # AI Futures Trading System - Agent Guidelines
 
-**文件版本**: 3.5.0
+**文件版本**: 4.6.0
 
 ## Overview
 
@@ -57,7 +57,35 @@ Using `--simulate` flag:
 - Skips Shioaji API login
 - Simulated orders fill immediately
 - Simulated positions and PnL are tracked
+- **Mock price generation with trend simulation** (see below)
 - Suitable for development and testing
+
+#### Mock Price Generation (New in v4.4.0)
+
+The simulation mode now uses a **trend-based price generation algorithm** instead of static prices:
+
+**Algorithm Features:**
+- Base fluctuation: 0.3% ~ 0.8% (approx. 54-144 points)
+- Trend momentum: Increases for first 5 bars (1.0x → 1.75x)
+- Trend fatigue: Decreases after 5 bars (1.75x → 0.5x)
+- Random noise: ±0.2%
+- Reversal probability: 30% (simulates market turning points)
+
+**Benefits:**
+- RSI indicators can reach 70+ (overbought) and 30- (oversold)
+- MACD generates clear golden/dead crosses during trends
+- Breakout strategies trigger properly with continuous price movement
+- Prevents false stop-loss triggers caused by fixed 18000 price
+
+**Implementation:**
+- All strategies run at **1-minute K-bar frequency** in simulation
+- The strategy's `timeframe` parameter only affects internal logic
+- Real market data is used in live trading (simulation doesn't affect live mode)
+
+**Position Entry Price Handling:**
+- When creating MockContract, the system checks existing positions
+- Uses position's `avg_price` as `last_price` to avoid false stop-loss triggers
+- Logs: "Using position entry price XXXX as mock price for SYMBOL"
 
 ### Testing
 
@@ -398,6 +426,68 @@ When a strategy is created, the system automatically performs **two-stage verifi
 
 3. **On 3 failures**: Notifies user with error details, user must recreate strategy
 
+#### Stage 1 Review Logging (New in v4.6.0)
+
+When Stage 1 verification fails, detailed logs are saved to help diagnose issues:
+
+**Location:** `workspace/logs/stage1_review/`
+
+**File format:** `{StrategyName}_{timestamp}_failed.txt`
+
+**Log contents:**
+- Strategy ID and timestamp
+- User's original prompt
+- Failure reason (from LLM review)
+- Suggestion for fixes (from LLM)
+- Complete generated code
+- Full LLM review response
+
+**Example log file:**
+```
+================================================================================
+STAGE 1 REVIEW FAILED - DETAILED REPORT
+================================================================================
+
+Strategy ID: BreakoutStrategy
+Timestamp: 2026-03-01 04:02:13
+User Prompt: price > 前5根K棒的最高價買進...
+
+================================================================================
+FAILURE ANALYSIS
+================================================================================
+
+Failure Reason:
+策略邏輯未能正確實現突破買入條件...
+
+Suggestion:
+建議修改為：high_5 = max(b.high for b in bars[-5:])...
+
+================================================================================
+GENERATED CODE
+================================================================================
+
+class BreakoutStrategy(TradingStrategy):
+    def on_bar(self, bar: BarData) -> str:
+        ...
+
+================================================================================
+FULL LLM REVIEW RESPONSE
+================================================================================
+
+審查結果：不通過
+原因：程式碼邏輯錯誤，應該使用 max() 計算5日最高價
+修正建議：修改 high_5 的計算方式
+
+================================================================================
+END OF REPORT
+================================================================================
+```
+
+**Purpose:**
+- Debug why LLM review failed
+- Understand the gap between user intent and generated code
+- Improve strategy descriptions based on failure patterns
+
 Only strategies that pass verification can be enabled by users.
 
 #### Strategy States
@@ -493,12 +583,39 @@ The BacktestEngine uses **pandas_ta** for indicator calculation, integrated with
 ```
 
 **Process:**
-1. Parse strategy code to extract indicator requirements
-2. Get historical K-bars from Shioaji → pandas DataFrame
-3. Calculate indicators using pandas_ta
-4. Create backtrader Cerebro + Strategy + Analyzers
-5. Run backtest
-6. Output performance report
+1. Compile and execute strategy code directly (real-time indicator calculation)
+2. Strategy's `ta()` method calculates indicators on-demand using full historical DataFrame
+3. Create backtesting.py Strategy class that wraps the compiled TradingStrategy
+4. Run backtest - strategy calculates indicators in real-time for each bar
+5. Output performance report with chart and text analysis
+
+> **Important Change (v4.6.0)**: The backtest engine no longer pre-calculates indicators. Instead, the strategy's `ta()` method calculates indicators on-demand using the full historical DataFrame. This ensures backtest results exactly match live trading behavior.
+
+#### Backtest Metrics Calculation (v4.6.0+)
+
+**Total PnL Calculation:**
+```python
+# OLD (incorrect): 
+# total_pnl = initial_capital * return_pct / 100 * contract_multiplier
+
+# NEW (correct):
+equity_final = stats.get('Equity Final [$]', initial_capital)
+total_pnl = equity_final - initial_capital  # Actual equity change
+```
+
+**Profit Factor Calculation:**
+```python
+# OLD (incorrect):
+# profit_factor = avg_win / avg_loss (using total_pnl)
+
+# NEW (correct):
+trades_df = stats._trades
+winning_trades = trades_df[trades_df['PnL'] > 0]
+losing_trades = trades_df[trades_df['PnL'] < 0]
+total_wins = winning_trades['PnL'].sum()
+total_losses = abs(losing_trades['PnL'].sum())
+profit_factor = total_wins / total_losses
+```
 
 #### Usage
 
@@ -869,7 +986,8 @@ if enable_match:
 | `orders` / `訂單` | `get_order_history()` | Order history |
 | `new` / `新對話` | `clear_history()` | Clear conversation |
 | `help` / `幫助` | `show_help()` | Show help |
-| `enable <ID>` | `enable_strategy()` | Enable strategy |
+| `enable <ID>` | `enable_strategy()` | Enable strategy (with position check) |
+| `confirm enable <ID>` | `confirm_enable_with_close()` | Confirm enable and close old positions |
 | `backtest <ID>` | `backtest_strategy()` | Execute historical backtest (with chart) |
 | `disable <ID>` | `disable_strategy()` | Disable strategy |
 | `delete <ID>` | `delete_strategy_tool()` | Delete strategy |
@@ -967,9 +1085,93 @@ Access: `http://127.0.0.1:5000`
 | GET | `/api/risk` | Risk status |
 | POST | `/api/backtest/<id>` | Run backtest |
 
+#### Backtest API Enhancement (v4.6.0+)
+
+**Response Format:**
+```json
+{
+    "success": true,
+    "chart_path": "/workspace/backtests/TMF260001_v1_20260301003042.html",
+    "report_path": "/workspace/backtests/TMF260001_v1_20260301003042.txt",
+    "report": "📊 歷史回測報告...",
+    "metrics": {
+        "total_return": -15.23,
+        "total_pnl": -152300,
+        "trade_count": 367,
+        "win_rate": 35.2,
+        "profit_factor": 0.85,
+        "max_drawdown": -25.6,
+        "sharpe_ratio": -1.2
+    }
+}
+```
+
+**New Features:**
+
+1. **Text Report Saving** - Backtest now saves both HTML chart and TXT text report
+2. **Dual-Path Return** - `chart_path` for iframe display, `report_path` for text analysis
+3. **Enhanced Metrics** - Corrected calculations for total_pnl and profit_factor
+
+#### Backtest Choice Modal
+
+When clicking the backtest button, the system shows a choice modal:
+
+**Scenario A: Existing Report Available**
+- Shows latest report timestamp
+- Button 1: "📄 View Existing Report" - Opens saved HTML/TXT
+- Button 2: "🔄 Run New Backtest" - Re-executes backtest
+
+**Scenario B: No Existing Report**
+- Shows "No backtest report found"
+- Only option: Run first backtest
+
+**Implementation:**
+- Check endpoint: `GET /api/backtest/<id>/check`
+- Returns: `has_report`, `chart_path`, `report_path`, `time_ago`
+
 ### Modal Confirmation
 
-When disabling/deleting a strategy with positions, the API returns modal confirmation data:
+When **enabling/disabling/deleting** a strategy with positions, the API returns modal confirmation data:
+
+#### Enable Strategy with Existing Positions
+
+When enabling a new strategy, if old strategies with the same symbol have positions:
+
+```json
+{
+    "needs_confirmation": true,
+    "title": "確認啟用",
+    "message": "舊策略 MXF260006 仍有 5口 部位",
+    "position": {
+        "symbol": "MXF",
+        "quantity": 5,
+        "direction": "Buy",
+        "pnl": 1200,
+        "entry_price": 18500,
+        "current_price": 18740
+    },
+    "risks": [
+        "強制平倉 MXF260006 (5口 MXF)",
+        "損益: +1,200",
+        "啟用新策略"
+    ]
+}
+```
+
+**Confirmation Flow:**
+1. User clicks "Enable" for new strategy
+2. System checks if old strategies have positions
+3. If yes, returns `needs_confirmation: true`
+4. Frontend shows modal with position details and PnL
+5. User confirms → DELETE request to `/api/strategies/<id>/enable`
+6. System:
+   - Places market order to close old positions
+   - Records order with reason: "Forced close - enabling new strategy"
+   - Disables old strategy
+   - Enables new strategy
+   - Sends Telegram notification
+
+#### Disable/Delete Strategy with Positions
 
 ```json
 {
@@ -994,6 +1196,232 @@ src/web/
     ├── status.py      # /api/status
     ├── strategies.py # /api/strategies
     ├── positions.py  # /api/positions
+    ├── orders.py    # /api/orders
     ├── risk.py       # /api/risk
     └── backtest.py   # /api/backtest
 ```
+
+### Strategy Creation Page
+
+The strategy creation page (`/strategies/create`) provides a user-friendly interface for creating new trading strategies with two-stage verification.
+
+#### Creation Flow
+
+1. **Parameter Input**
+   - Select futures symbol (TXF/MXF/TMF)
+   - Select trading direction (long/short/both, default: long)
+   - Enter strategy prompt (e.g., "RSI below 30 buy, above 70 sell")
+   - Configure timeframe, stop loss, take profit, quantity
+
+2. **Preview Generation**
+   - Click "Generate" button to call LLM
+   - LLM generates complete strategy description
+   - User can review and modify parameters
+
+3. **Confirmation & Verification**
+   - Click "Confirm" to generate strategy code
+   - **Progress Bar Display**: Shows fake progress animation (timer-based)
+     - Step 1 (15%): "🔄 Creating strategy..."
+     - Step 2 (35%): "📝 Generating strategy code..."
+     - Step 3 (55%): "🔍 LLM reviewing (Stage 1)..."
+     - Step 4 (75%): "📊 Backtesting (Stage 2)..."
+     - Step 5 (90%): "📈 Finalizing results..."
+     - Complete (100%): Shows verification results
+   - Two-stage verification (LLM Review + Backtest)
+   - Backtest chart and analysis displayed
+
+**Note**: The progress bar uses a **timer-based animation** (not real-time SSE) to provide visual feedback during the potentially long verification process (20-60 seconds). The backend actually performs all verification steps synchronously.
+
+#### API Endpoints
+
+| Method | URL | Description |
+|--------|-----|-------------|
+| GET | `/strategies/create` | Strategy creation page |
+| POST | `/api/strategies/preview` | Generate strategy preview |
+| POST | `/api/strategies/confirm` | Confirm and create strategy with verification |
+
+### Template Guidelines
+
+When creating new Web templates, follow these rules to avoid common issues:
+
+> **Summary of Recent Issues (2026-02-28)**:
+> 1. Orders page had nested `<script>` tags causing `expected expression, got '<'` error
+> 2. Multiple templates declared `const REFRESH_INTERVAL` causing "redeclaration" error  
+> 3. Missing `get_by_date` method in OrderStore caused API failure
+> 
+> **Solution**: 
+> - base.html wraps `{% block extra_js %}` inside `<script>`, so child templates should NOT add `<script>` tags
+> - Use `var` instead of `const` for REFRESH_INTERVAL in child templates (base.html already defines it)
+> - Always test API endpoints independently: `curl http://127.0.0.1:5001/api/orders`
+
+#### 1. JavaScript Block Structure
+
+Always place the closing `</script>` tag **before** `{% endblock %}`:
+
+```html
+{% block extra_js %}
+<script>
+    function myFunction() {
+        // code
+    }
+    
+    myFunction();
+</script>
+{% endblock %}
+```
+
+**Wrong** (will cause syntax error):
+```html
+{% block extra_js %}
+<script>
+    myFunction();
+</script>
+{% endblock %}
+```
+
+#### 2. Template Inheritance
+
+All pages must extend `base.html`:
+```html
+{% extends "base.html" %}
+
+{% block title %}Page Title{% endblock %}
+
+{% block content %}
+<!-- Page content -->
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// JavaScript code
+</script>
+{% endblock %}
+```
+
+#### 3. Common Elements
+
+All templates should have:
+- `{% block title %}` - Page title
+- `{% block content %}` - Main content
+- `{% block extra_js %}` - Page-specific JavaScript
+
+#### 4. Testing New Templates
+
+After creating a new template:
+1. Restart the server completely (not hot reload)
+2. Check browser's Developer Tools → Console for JavaScript errors
+3. Verify template renders correctly by viewing page source
+
+#### 5. Common Errors and Solutions
+
+##### Error 1: Duplicate `const` declarations
+**Problem**: Multiple templates declare the same `const` variable, causing "redeclaration of const" error.
+
+**Example** (WRONG - in child template):
+```html
+{% block extra_js %}
+<script>
+const REFRESH_INTERVAL = 30000;  // ❌ ERROR: base.html already has this
+
+function loadData() { ... }
+loadData();
+</script>
+{% endblock %}
+```
+
+**Solution**:
+- Use `var` instead of `const` in child templates
+- Or check if variable exists before declaring:
+```html
+{% block extra_js %}
+<script>
+if (typeof REFRESH_INTERVAL === 'undefined') {
+    var REFRESH_INTERVAL = 30000;
+}
+
+function loadData() { ... }
+loadData();
+</script>
+{% endblock %}
+```
+
+##### Error 2: Nested `<script>` tags
+**Problem**: Child template wraps JS in `<script>` tags while base.html also has `<script>` tags around `{% block extra_js %}`.
+
+**Result**: Generated HTML has nested scripts:
+```html
+<script>  <!-- base.html -->
+    <script>  <!-- child template - SYNTAX ERROR! -->
+        function loadData() { ... }
+    </script>
+</script>
+```
+
+**Solution**:
+- Remove `<script>` tags from child templates when base.html already wraps the block
+- Or move `{% block extra_js %}` outside of `<script>` in base.html
+
+##### Error 3: Missing block structure
+**Problem**: Template has content but no `{% block content %}` wrapper.
+
+**Result**: "Unexpected end of template" or "looking for endblock" error.
+
+**Solution**: Always wrap page content:
+```html
+{% extends "base.html" %}
+
+{% block title %}Page Title{% endblock %}
+
+{% block content %}
+<!-- All HTML content here -->
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// JavaScript here
+</script>
+{% endblock %}
+```
+
+##### Error 4: Browser console shows "expected expression, got '<'"
+**Problem**: Usually caused by nested `<script>` tags or HTML being parsed as JavaScript.
+
+**Debug steps**:
+1. Check browser Developer Tools → Elements tab
+2. Look for nested `<script>` tags
+3. Verify `{% block extra_js %}` content is properly wrapped
+4. Ensure `</script>` comes before `{% endblock %}`
+
+##### Error 5: Page stuck on "載入中"
+**Problem**: JavaScript error prevents `loadOrders()` or similar function from executing.
+
+**Debug steps**:
+1. Check Console for JS errors
+2. Verify API endpoint works: `curl http://127.0.0.1:5001/api/orders`
+3. Check Network tab for failed requests
+4. Look for syntax errors in template-generated JS
+
+#### 6. Template Checklist
+
+Before committing new templates:
+- [ ] Extends `base.html`
+- [ ] Has `{% block title %}`
+- [ ] Has `{% block content %}` wrapping all HTML
+- [ ] Has `{% block extra_js %}` (if needed) with `<script>` tags
+- [ ] `</script>` comes before `{% endblock %}`
+- [ ] No duplicate `const` declarations (use `var` or check `typeof`)
+- [ ] No nested `<script>` tags
+- [ ] Tested in browser with cleared cache
+- [ ] Console shows no errors
+
+#### 7. Best Practices
+
+1. **Always restart server** after template changes (Flask caches templates)
+2. **Clear browser cache** when testing (Ctrl+Shift+R)
+3. **Use browser Developer Tools** to debug JS errors
+4. **Check rendered HTML source** to verify template structure
+5. **Test API endpoints independently** before testing pages:
+   ```bash
+   curl http://127.0.0.1:5001/api/orders
+   ```
+6. **Add `console.log()`** in JavaScript to trace execution

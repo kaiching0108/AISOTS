@@ -10,9 +10,10 @@ Web Interface 是 AISOTS 的網頁介面，提供圖形化操作方式，讓用�
 
 | Phase | 功能 | 說明 |
 |-------|------|------|
-| Phase 1 | 系統總覽 | 系統狀態、策略數、部位數、當日損益 |
-| Phase 1 | 策略管理 | 列表、啟用、停用、刪除（含 Modal 確認）|
+| Phase 1 | 系統總覽 | 系統狀態、策略數、部位數、當日損益、**重要交易訊息** |
+| Phase 1 | 策略管理 | 列表、啟用、停用、刪除（含 Modal 確認）、**回測** |
 | Phase 1 | 部位查詢 | 部位列表、損益顯示 |
+| Phase 1 | **訂單查詢** | **訂單列表、狀態、原因、成交價** |
 | Phase 1 | 風控狀態 | 風控參數顯示 |
 | Phase 1 | 歷史回測 | 執行回測並顯示結果 |
 | Phase 2 | 策略建立 | 表單式建立策略、兩階段驗證 |
@@ -104,7 +105,10 @@ src/web/templates/
 | DELETE | `/api/strategies/<id>` | 刪除策略（需確認時回傳 Modal 資料）|
 | DELETE | `/api/strategies/<id>/delete` | 確認刪除（強制平倉）|
 | GET | `/api/positions` | 部位列表 |
+| GET | `/api/orders` | **訂單列表（含原因欄位）** |
 | GET | `/api/risk` | 風控狀態 |
+| GET | `/api/trade-logs` | **交易日誌（重要交易訊息）** |
+| GET | `/api/trade-logs/stats` | **交易日誌統計** |
 | POST | `/api/backtest/<id>` | 執行回測 |
 
 ### 策略建立 API（Phase 2）
@@ -114,7 +118,6 @@ src/web/templates/
 | GET | `/strategies/create` | 策略建立頁面 |
 | POST | `/api/strategies/preview` | 生成策略描述預覽 |
 | POST | `/api/strategies/confirm` | 確認並生成策略代碼（含驗證）|
-| POST | `/api/strategies/create-stream` | SSE 串流建立策略（預留）|
 
 ### API 詳細說明
 
@@ -173,11 +176,41 @@ src/web/templates/
             "win_rate": 60,
             "total_return": 5.2
         },
-        "chart_path": "/workspace/backtests/TMF260001_v1_20260227120000.png",
+        "chart_path": "/workspace/backtests/TMF260001_v1_20260227120000.html",
+        "report_path": "/workspace/backtests/TMF260001_v1_20260227120000.txt",
         "analysis": "📊 策略分析...\n\n✅ 策略在回測期間為您賺了..."
     }
 }
 ```
+
+**說明：**
+- `chart_path`：回測圖表 HTML 檔案路徑，用於 iframe 嵌入顯示
+- `report_path`：回測文字報告 TXT 檔案路徑（v4.6.0+ 新增）
+- `analysis`：策略分析文字
+- `verification.trade_count`：回測交易次數
+- `verification.win_rate`：勝率（%）
+- `verification.total_return`：總回報率（%）
+
+#### GET /api/backtest/<id>/check
+
+檢查是否存在最新的回測報告。
+
+**回應：**
+```json
+{
+    "has_report": true,
+    "chart_path": "/workspace/backtests/TMF260001_v1_20260301003042.html",
+    "report_path": "/workspace/backtests/TMF260001_v1_20260301003042.txt",
+    "report_time": "2026-03-01 00:30:42",
+    "time_ago": "40 分鐘前",
+    "strategy_name": "策略_TMF",
+    "version": 1
+}
+```
+
+**用途：**
+- 顯示"查看已存在報告 / 執行新回測"選擇 Modal
+- 避免重複執行相同的回測
 
 ### Modal 確認流程
 
@@ -219,9 +252,10 @@ src/web/templates/
 
 | 頁面 | 路由 | 功能 |
 |------|------|------|
-| 首頁 | `/` | 系統總覽、策略概覽、部位概覽、風控狀態 |
+| 首頁 | `/` | 系統總覽、策略概覽、部位概覽、風控狀態、**重要交易訊息** |
 | 策略頁面 | `/strategies` | 策略列表、啟用/停用/刪除按鈕，回測按鈕 |
 | 部位頁面 | `/positions` | 部位列表、損益顯示 |
+| **訂單頁面** | **`/orders`** | **訂單列表、狀態、原因、成交價** |
 | 策略建立頁面 | `/strategies/create` | 策略參數輸入、預覽、驗證、進度條 |
 
 ### 策略建立頁面功能（Phase 2）
@@ -241,6 +275,53 @@ src/web/templates/
    - 兩階段驗證（LLM Review + Backtest）
    - 進度條顯示當前階段
    - 回測圖表與分析說明
+
+### 訂單查詢頁面功能
+
+**訂單列表** (`/orders`)：
+- 顯示所有訂單（開倉/平倉）
+- **原因欄位**：顯示訂單觸發原因（如「策略訊號: buy」、「平倉: 策略訊號或停損止盈」）
+- 支援狀態篩選（待處理/已提交/已成交/已取消/已拒絕）
+- 支援策略篩選
+- 支援日期篩選（今日/全部）
+- 按時間排序（最新在前）
+
+**訂單欄位**：
+| 欄位 | 說明 |
+|------|------|
+| 時間 | 訂單建立時間 |
+| 策略 | 策略 ID |
+| 期貨 | 合約代碼 |
+| 方向 | 買進/賣出（顏色區分）|
+| 口數 | 交易數量 |
+| 價格 | 訂單價格或「市價」|
+| 狀態 | Pending/Submitted/Filled/Cancelled/Rejected |
+| **原因** | **訂單觸發原因** |
+| 成交價 | 實際成交價格 |
+
+### 交易日誌功能
+
+**重要交易訊息**（系統總覽頁面底部）：
+
+顯示最近的交易日誌，包括：
+- **下單成功**（綠色）：策略開倉訂單
+- **平倉完成**（藍色）：部位平倉訂單
+- **風控擋單**（紅色）：風控阻擋的訂單
+- **下單失敗**（黃色）：失敗的訂單嘗試
+
+**功能特性**：
+- 顯示最近 50 筆交易日誌
+- 支援依事件類型過濾（全部/下單成功/平倉/風控擋單/下單失敗）
+- 自動刷新（每 30 秒）
+- 手動刷新按鈕
+- 統計資訊（24小時/7天筆數、各類型數量）
+
+**日誌內容**：
+- 策略名稱與 ID
+- 時間戳
+- 交易訊息（如「策略A 買進 1口 @ 18500」）
+- 損益資訊（平倉時顯示）
+- 事件類型標籤
 
 ---
 
@@ -270,7 +351,7 @@ src/web/templates/
 ### 7.5 即時通知
 
 - **Phase 1**：不支援即時推播
-- **未來規劃**：可考慮 WebSocket 或 Server-Sent Events
+- **未來規劃**：可考慮 WebSocket 實現即時通知
 
 ### 7.6 部署
 
@@ -333,7 +414,6 @@ class BacktestEngine:
 | 圖表顯示 | 績效圖表、部位變化圖 |
 | 即時通知 | WebSocket 推播 |
 | 響應式設計 | 支援手機/平板 |
-| SSE 進度顯示 | 使用 Server-Sent Events 實現即時進度 |
 
 ---
 

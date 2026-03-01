@@ -38,12 +38,12 @@ class RiskManager:
                 "reason": f"下單頻率過高，超過 {self.max_orders_per_minute} 次/分鐘"
             }
         
-        # 2. 檢查最大口數
-        new_total = current_positions + quantity
+        # 2. 檢查最大口數 (使用絕對值)
+        new_total = abs(current_positions) + abs(quantity)
         if new_total > self.max_position:
             return {
                 "passed": False,
-                "reason": f"超過最大部位限制 {self.max_position} 口 (目前: {current_positions}, 新增: {quantity})"
+                "reason": f"超過最大部位限制 {self.max_position} 口 (目前: {abs(current_positions)}, 新增: {abs(quantity)})"
             }
         
         # 3. 檢查單日虧損

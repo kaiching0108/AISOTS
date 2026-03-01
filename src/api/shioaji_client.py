@@ -10,6 +10,23 @@ from src.logger import logger
 class ShioajiClient:
     """Shioaji API 客戶端封裝"""
     
+    # 類常量：Timeframe 價格波動率映射表（回測與實時交易共用）
+    # 基於台指期實際波動特性設定的經驗值
+    TIMEFRAME_VOLATILITY = {
+        "1m": 0.0003,   # 0.03%（約5-10點）
+        "5m": 0.0008,   # 0.08%（約14-15點）
+        "15m": 0.0015,  # 0.15%（約27點）
+        "30m": 0.002,   # 0.2%（約36點）
+        "1h": 0.003,    # 0.3%（約54點）
+        "4h": 0.006,    # 0.6%（約108點）
+        "1d": 0.012,    # 1.2%（約216點）
+    }
+    
+    @classmethod
+    def get_timeframe_volatility(cls, timeframe: str = "1h") -> float:
+        """獲取指定 timeframe 的價格波動率"""
+        return cls.TIMEFRAME_VOLATILITY.get(timeframe.lower(), 0.003)
+    
     def __init__(self, api_key: str, secret_key: str, simulation: bool = True, skip_login: bool = False):
         self.api_key = api_key
         self.secret_key = secret_key
@@ -26,6 +43,14 @@ class ShioajiClient:
         self._mock_positions: List[Dict[str, Any]] = []
         self._mock_orders: List[Dict[str, Any]] = []
         self._order_id_counter = 1000
+        
+        # 策略運行器參考（用於模擬模式下獲取動態價格）
+        self._strategy_runner = None
+    
+    def set_strategy_runner(self, runner):
+        """設置策略運行器參考（用於模擬模式下獲取動態價格）"""
+        self._strategy_runner = runner
+        logger.info("已設置策略運行器參考，模擬價格將使用動態趨勢價格")
     
     def login(self) -> bool:
         """登入 Shioaji"""
@@ -128,7 +153,7 @@ class ShioajiClient:
             return None
     
     def _create_mock_contract(self, symbol: str) -> Optional[Any]:
-        """建立模擬合約物件"""
+        """建立模擬合約物件（使用動態價格）"""
         try:
             from dataclasses import dataclass
             
@@ -146,6 +171,9 @@ class ShioajiClient:
                 last_price: float = 0.0
                 reference: float = 0.0
                 
+                def __len__(self):
+                    return 1
+            
             category = symbol[:3] if len(symbol) >= 3 else symbol
             month = symbol[3:] if len(symbol) > 3 else ""
             
@@ -154,6 +182,9 @@ class ShioajiClient:
                 "MXF": "小型臺指",
                 "TMF": "微型臺指期貨"
             }
+            
+            # 獲取模擬價格（優先順序：strategy_runner > 部位價格 > 基礎價格）
+            last_price = self._get_mock_price(symbol)
             
             return MockContract(
                 code=symbol,
@@ -164,11 +195,97 @@ class ShioajiClient:
                 underlying=category,
                 limit_up=99999.0,
                 limit_down=0.0,
-                margin=50000.0
+                margin=50000.0,
+                last_price=last_price,
+                reference=last_price
             )
         except Exception as e:
             logger.error(f"建立模擬合約失敗 {symbol}: {e}")
             return None
+    
+    def _get_mock_price(self, symbol: str) -> float:
+        """獲取模擬價格（優先順序：strategy_runner > 部位價格 > 基礎價格）"""
+        base_price = 18000.0
+        
+        # 1. 優先從 strategy_runner 獲取動態價格
+        if self._strategy_runner:
+            try:
+                market_data = self._strategy_runner.get_market_data(symbol)
+                if market_data and hasattr(market_data, 'close_prices') and market_data.close_prices:
+                    dynamic_price = float(market_data.close_prices[-1])
+                    logger.debug(f"使用 strategy_runner 動態價格 {dynamic_price} 作為 {symbol} 的模擬價格")
+                    return dynamic_price
+            except Exception as e:
+                logger.debug(f"從 strategy_runner 獲取價格失敗: {e}")
+        
+        # 2. 檢查是否有現有部位，使用進場價作為現價
+        existing_position = next(
+            (p for p in self._mock_positions if p['symbol'] == symbol), 
+            None
+        )
+        if existing_position:
+            position_price = existing_position.get('avg_price', base_price)
+            logger.info(f"使用部位進場價 {position_price} 作為 {symbol} 的模擬價格")
+            return position_price
+        
+        # 3. 使用基礎價格
+        logger.debug(f"使用基礎價格 {base_price} 作為 {symbol} 的模擬價格")
+        return base_price
+    
+    def _generate_simulate_trend_price(
+        self,
+        last_price: float,
+        trend: int,
+        trend_duration: int,
+        base_volatility: float = 0.003
+    ) -> tuple:
+        """
+        生成趨勢模擬價格（與 _simulate_price_updates 使用相同算法）
+        
+        與 main.py _simulate_price_updates 完全一致的趨勢模擬邏輯：
+        - 基礎波動：0.3% ~ 0.8%
+        - 趨勢加成：前5根遞增 (1.0x → 1.75x)，之後回調 (1.75x → 0.5x)
+        - 隨機雜訊：±0.2%
+        - 反轉概率：30%
+        
+        Args:
+            last_price: 上一根K線收盤價
+            trend: 趨勢方向 (1=上漲, -1=下跌)
+            trend_duration: 趨勢持續根數
+            base_volatility: 基礎波動率 (預設 0.003 = 0.3%)
+            
+        Returns:
+            tuple: (new_price, new_trend, new_trend_duration)
+        """
+        import random
+        
+        # 基礎變動幅度 (0.3% ~ 0.8%)
+        base_change = random.uniform(base_volatility, base_volatility * 2.67)
+        
+        # 趨勢加成：趨勢越久，動量越大，但久了會疲態（回調）
+        # 前5根：動量遞增，之後開始回調
+        if trend_duration <= 5:
+            momentum = 1 + (trend_duration * 0.15)  # 最大 1.75x
+        else:
+            momentum = 1.75 - ((trend_duration - 5) * 0.1)  # 開始回調
+            momentum = max(momentum, 0.5)  # 最小 0.5x
+        
+        # 計算價格變動百分比
+        change_pct = trend * base_change * momentum
+        
+        # 加入隨機雜訊（±0.2%）
+        noise = random.uniform(-0.002, 0.002)
+        change_pct += noise
+        
+        # 30% 概率反轉趨勢
+        if random.random() < 0.3:
+            trend = -trend
+            trend_duration = 0
+        
+        # 計算新收盤價（限制為整數）
+        new_price = round(last_price * (1 + change_pct))
+        
+        return new_price, trend, trend_duration + 1
     
     def get_kbars(self, contract: Any, timeframe: str = "1D", count: int = 100) -> Optional[Any]:
         """取得K線資料"""
@@ -182,9 +299,10 @@ class ShioajiClient:
             return None
     
     def _generate_mock_kbars(self, contract: Any, timeframe: str, count: int) -> Optional[Dict[str, Any]]:
-        """產生模擬K線資料"""
+        """產生模擬K線資料（使用趨勢模擬算法，根據 timeframe 調整波動率）"""
         try:
             from datetime import datetime, timedelta
+            import random
             
             now = datetime.now()
             intervals = {
@@ -201,6 +319,9 @@ class ShioajiClient:
             }
             minutes = intervals.get(timeframe.lower(), 1440)
             
+            # 根據 timeframe 調整價格波動率（使用類常量）
+            base_volatility = ShioajiClient.get_timeframe_volatility(timeframe)
+            
             timestamps = []
             opens = []
             highs = []
@@ -208,23 +329,52 @@ class ShioajiClient:
             closes = []
             volumes = []
             
-            base_price = 18000
+            # 初始化趨勢狀態（固定初始價格 18000，Q1 選項A）
+            current_price = 18000.0
+            trend = random.choice([-1, 1])  # 隨機初始趨勢：1=上漲, -1=下跌
+            trend_duration = 0
+            
+            logger.info(f"開始生成趨勢模擬K線: {contract.symbol if hasattr(contract, 'symbol') else 'Unknown'} {timeframe} {count}根，波動率 {base_volatility*100:.3f}%，初始價格 {current_price}")
+            
             for i in range(count):
                 ts = now - timedelta(minutes=minutes * (count - i))
                 timestamps.append(int(ts.timestamp()))
                 
-                change = (hash(str(i)) % 200 - 100) / 100
-                close = base_price + change * 10
-                open_price = close + (hash(str(i * 2)) % 100 - 50) / 10
-                high = max(open_price, close) + abs(hash(str(i * 3)) % 50) / 10
-                low = min(open_price, close) - abs(hash(str(i * 4)) % 50) / 10
-                volume = 1000 + hash(str(i)) % 5000
+                # 使用統一的趨勢模擬算法生成收盤價（根據 timeframe 調整波動率）
+                new_close, trend, trend_duration = self._generate_simulate_trend_price(
+                    current_price, trend, trend_duration, base_volatility
+                )
                 
-                opens.append(open_price)
-                highs.append(high)
-                lows.append(low)
-                closes.append(close)
+                # 生成OHLC（與實時交易 _simulate_price_updates 一致）
+                if trend > 0:  # 上漲趨勢
+                    new_open = round(current_price * (1 + random.uniform(-0.001, 0.002)))
+                    new_high = round(max(new_open, new_close) * (1 + random.uniform(0.001, 0.003)))
+                    new_low = round(min(new_open, new_close) * (1 - random.uniform(0.001, 0.002)))
+                else:  # 下跌趨勢
+                    new_open = round(current_price * (1 + random.uniform(-0.002, 0.001)))
+                    new_high = round(max(new_open, new_close) * (1 + random.uniform(0.001, 0.002)))
+                    new_low = round(min(new_open, new_close) * (1 - random.uniform(0.002, 0.003)))
+                
+                volume = random.randint(1000, 8000)
+                
+                opens.append(new_open)
+                highs.append(new_high)
+                lows.append(new_low)
+                closes.append(new_close)
                 volumes.append(volume)
+                
+                # 更新當前價格為下一根K線的基礎
+                current_price = new_close
+                
+                # 每10根K線記錄一次趨勢狀態
+                if i > 0 and i % 10 == 0:
+                    logger.debug(f"K線 {i}/{count}: 趨勢 {'上漲' if trend > 0 else '下跌'} {trend_duration}根，價格 {new_close}")
+            
+            # 記錄最終趨勢摘要
+            first_price = closes[0]
+            last_price = closes[-1]
+            price_change = ((last_price - first_price) / first_price) * 100
+            logger.info(f"趨勢模擬K線生成完成: {count}根，價格變化 {first_price} → {last_price} ({price_change:+.2f}%)")
             
             return {
                 "ts": timestamps,
@@ -237,6 +387,8 @@ class ShioajiClient:
             
         except Exception as e:
             logger.error(f"產生模擬K線失敗: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return None
     
     def get_contracts_by_category(self, category: str) -> List[Any]:
@@ -317,6 +469,13 @@ class ShioajiClient:
             order_id = f"OFFLINE_{self._order_id_counter}"
             self._order_id_counter += 1
             
+            # 取得模擬成交價（使用動態價格，而非固定18500）
+            if price > 0:
+                filled_price = price
+            else:
+                filled_price = self._get_mock_price(symbol)
+                logger.debug(f"模擬下單使用動態價格: {symbol} @ {filled_price}")
+            
             mock_trade = type('MockTrade', (), {
                 'order_id': order_id,
                 'status': 'F',
@@ -324,10 +483,11 @@ class ShioajiClient:
                 'symbol': symbol,
                 'quantity': quantity,
                 'price': price,
-                'filled_price': price if price > 0 else 18500,
+                'filled_price': filled_price,
                 'filled_quantity': quantity,
                 'order_type': order_type,
                 'price_type': price_type,
+                'order': type('MockOrder', (), {'seqno': None})(),
             })()
             
             self._mock_orders.append({
@@ -477,6 +637,11 @@ class ShioajiClient:
     
     def subscribe_quote(self, symbol: str, quote_type: str = "tick") -> bool:
         """訂閱報價"""
+        # 模擬模式：跳過報價訂閱
+        if self.simulation or self.skip_login:
+            logger.debug(f"模擬模式跳過報價訂閱: {symbol}")
+            return True
+        
         if not self.connected:
             return False
         
@@ -497,6 +662,11 @@ class ShioajiClient:
     
     def unsubscribe_quote(self, symbol: str, quote_type: str = "tick") -> bool:
         """取消訂閱報價"""
+        # 模擬模式：跳過報價取消訂閱
+        if self.simulation or self.skip_login:
+            logger.debug(f"模擬模式跳過取消報價訂閱: {symbol}")
+            return True
+        
         if not self.connected:
             return False
         

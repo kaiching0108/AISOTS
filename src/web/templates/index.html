@@ -30,35 +30,49 @@
         <div class="loading">載入中...</div>
     </div>
 </div>
+
+<div class="card">
+    <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+        <span>📜 重要交易訊息</span>
+        <div style="display: flex; gap: 10px; align-items: center;">
+            <select id="logFilter" onchange="loadTradeLogs()" style="padding: 5px 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px;">
+                <option value="">全部類型</option>
+                <option value="ORDER_SUCCESS">下單成功</option>
+                <option value="CLOSE_POSITION">平倉</option>
+                <option value="RISK_BLOCKED">風控擋單</option>
+                <option value="ORDER_FAILED">下單失敗</option>
+            </select>
+            <button onclick="loadTradeLogs()" class="btn btn-sm" style="padding: 5px 12px; font-size: 13px;">
+                🔄 刷新
+            </button>
+        </div>
+    </div>
+    <div id="tradeLogs" style="max-height: 400px; overflow-y: auto;">
+        <div class="loading">載入中...</div>
+    </div>
+    <div id="logStats" style="padding: 10px 20px; background: #f8f9fa; border-top: 1px solid #eee; font-size: 12px; color: #666;">
+        統計載入中...
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
-    // 定义 REFRESH_INTERVAL（防止 base.html 未加载）
-    if (typeof REFRESH_INTERVAL === 'undefined') {
-        const REFRESH_INTERVAL = 30000;
-    }
-    
-    // 测试：立即执行
-    window.onerror = function(msg, url, line, col, error) {
-        console.error('Global error:', msg, 'at line', line);
-    };
-    
-    console.log('Script starting...');
-    
+<script>
     async function loadSystemStatus() {
-        console.log('loadSystemStatus called');
         try {
-            const [statusRes, strategiesRes, positionsRes, riskRes] = await Promise.all([
+            const [statusRes, strategiesRes, positionsRes, riskRes, perfRes] = await Promise.all([
                 fetch('/api/status'),
                 fetch('/api/strategies'),
                 fetch('/api/positions'),
-                fetch('/api/risk')
+                fetch('/api/risk'),
+                fetch('/api/performance?period=today')
             ]);
             
             const statusData = await statusRes.json();
             const strategiesData = await strategiesRes.json();
             const positionsData = await positionsRes.json();
             const riskData = await riskRes.json();
+            const perfData = await perfRes.json();
             
             // System Status
             document.getElementById('systemStatus').innerHTML = `
@@ -79,9 +93,14 @@
                     </div>
                     <div>
                         <div style="font-size: 24px; font-weight: bold;">
-                            ${(positionsData.summary?.total_pnl || 0).toLocaleString()}
+                            ${(perfData.success ? perfData.total_pnl : positionsData.summary?.total_pnl || 0).toLocaleString()}
                         </div>
                         <div style="color: #666; font-size: 12px;">當日損益</div>
+                        ${perfData.success ? `
+                        <div style="font-size: 10px; color: #999; margin-top: 2px;">
+                            已實現: ${perfData.realized_pnl.toLocaleString()} | 未實現: ${perfData.unrealized_pnl.toLocaleString()}
+                        </div>
+                        ` : ''}
                     </div>
                 </div>
             `;
@@ -132,18 +151,6 @@
                     </div>
                 </div>
             `;
-            
-            // Debug: test fetch
-            fetch('/api/status')
-                .then(r => r.json())
-                .then(data => {
-                    console.log('Fetch success:', data);
-                    document.getElementById('systemStatus').innerHTML = '<div class="empty-state">API 正常: ' + JSON.stringify(data).substring(0, 100) + '</div>';
-                })
-                .catch(err => {
-                    console.error('Fetch error:', err);
-                    document.getElementById('systemStatus').innerHTML = '<div class="empty-state">Fetch 失敗: ' + err.message + '</div>';
-                });
         } catch (e) {
             console.error('Error loading system status:', e);
             document.getElementById('systemStatus').innerHTML = '<div class="empty-state">載入失敗: ' + e.message + '</div>';
@@ -153,7 +160,103 @@
         }
     }
     
+    // 載入交易日誌
+    async function loadTradeLogs() {
+        try {
+            const filterType = document.getElementById('logFilter')?.value || '';
+            const url = filterType 
+                ? '/api/trade-logs?limit=50&event_type=' + filterType
+                : '/api/trade-logs?limit=50';
+            
+            const [logsRes, statsRes] = await Promise.all([
+                fetch(url),
+                fetch('/api/trade-logs/stats')
+            ]);
+            
+            const logsData = await logsRes.json();
+            const statsData = await statsRes.json();
+            
+            if (!logsData.success) {
+                throw new Error(logsData.error || '載入失敗');
+            }
+            
+            // 顯示日誌
+            const logsContainer = document.getElementById('tradeLogs');
+            const logs = logsData.data || [];
+            
+            if (logs.length === 0) {
+                logsContainer.innerHTML = '<div class="empty-state">目前無交易日誌</div>';
+            } else {
+                logsContainer.innerHTML = logs.map(function(log) {
+                    const typeClass = getLogTypeClass(log.event_type);
+                    const icon = getLogTypeIcon(log.event_type);
+                    const pnlDisplay = log.details && log.details.pnl !== undefined 
+                        ? '<div style="margin-top: 4px; font-size: 13px; font-weight: bold; color: ' + (log.details.pnl >= 0 ? '#27ae60' : '#e74c3c') + ';">損益: ' + (log.details.pnl >= 0 ? '+' : '') + log.details.pnl.toLocaleString() + '</div>'
+                        : '';
+                    
+                    return '<div style="padding: 10px 20px; border-bottom: 1px solid #eee; display: flex; align-items: center; gap: 12px;">' +
+                        '<span style="font-size: 16px;">' + icon + '</span>' +
+                        '<div style="flex: 1;">' +
+                            '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">' +
+                                '<span style="font-weight: 500; color: #2c3e50;">' + (log.strategy_name || log.strategy_id) + ' <span style="color: #999; font-size: 11px;">(' + log.strategy_id + ')</span></span>' +
+                                '<span style="font-size: 12px; color: #999;">' + log.formatted_time + '</span>' +
+                            '</div>' +
+                            '<div style="font-size: 14px; color: #666; line-height: 1.4;">' + log.message + '</div>' +
+                            pnlDisplay +
+                        '</div>' +
+                        '<span class="badge ' + typeClass + '" style="font-size: 11px; padding: 3px 8px;">' + log.event_type_display + '</span>' +
+                    '</div>';
+                }).join('');
+            }
+            
+            // 顯示統計
+            const statsContainer = document.getElementById('logStats');
+            if (statsData.success) {
+                const stats = statsData.data;
+                statsContainer.innerHTML = 
+                    '<span>24小時: ' + stats.total_24h + ' 筆</span> | ' +
+                    '<span>7天: ' + stats.total_7d + ' 筆</span> | ' +
+                    '<span>下單: ' + (stats.by_type.ORDER_SUCCESS || 0) + '</span> | ' +
+                    '<span>平倉: ' + (stats.by_type.CLOSE_POSITION || 0) + '</span> | ' +
+                    '<span>風控: ' + (stats.by_type.RISK_BLOCKED || 0) + '</span>';
+            }
+            
+        } catch (e) {
+            console.error('Error loading trade logs:', e);
+            document.getElementById('tradeLogs').innerHTML = '<div class="empty-state">載入失敗: ' + e.message + '</div>';
+        }
+    }
+    
+    function getLogTypeClass(eventType) {
+        const classes = {
+            'ORDER_SUCCESS': 'badge-success',
+            'CLOSE_POSITION': 'badge-primary',
+            'RISK_BLOCKED': 'badge-danger',
+            'ORDER_FAILED': 'badge-warning',
+            'SYSTEM': ''
+        };
+        return classes[eventType] || '';
+    }
+    
+    function getLogTypeIcon(eventType) {
+        const icons = {
+            'ORDER_SUCCESS': '✅',
+            'CLOSE_POSITION': '📤',
+            'RISK_BLOCKED': '🛡️',
+            'ORDER_FAILED': '❌',
+            'SYSTEM': 'ℹ️'
+        };
+        return icons[eventType] || '📝';
+    }
+    
+    // 頁面載入時執行
     loadSystemStatus();
-    setInterval(loadSystemStatus, REFRESH_INTERVAL);
+    loadTradeLogs();
+    
+    // 每30秒自動刷新
+    setInterval(function() {
+        loadSystemStatus();
+        loadTradeLogs();
+    }, REFRESH_INTERVAL);
 </script>
 {% endblock %}

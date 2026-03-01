@@ -247,9 +247,10 @@ class StrategyRunner:
                 await self._send_failure_notification(strategy, error_msg)
                 return False
             
-            strategy_class = self.llm_generator.compile_strategy(code, class_name)
+            strategy_class, error_msg = self.llm_generator.compile_strategy(code, class_name)
             if not strategy_class:
-                error_msg = f"LLM 生成失敗：編譯策略類別失敗 ({strategy.name})"
+                error_msg = error_msg or "編譯策略類別失敗"
+                error_msg = f"LLM 生成失敗：{error_msg} ({strategy.name})"
                 logger.error(error_msg)
                 await self._send_failure_notification(strategy, error_msg)
                 return False
@@ -300,12 +301,13 @@ class StrategyRunner:
             return None
         
         try:
-            strategy_class = self.llm_generator.compile_strategy(
+            strategy_class, error_msg = self.llm_generator.compile_strategy(
                 strategy.strategy_code,
                 strategy.strategy_class_name
             )
             
             if not strategy_class:
+                logger.error(f"Failed to compile strategy: {error_msg}")
                 return None
             
             executor = StrategyExecutor(strategy_class(strategy.symbol))

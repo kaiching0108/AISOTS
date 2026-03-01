@@ -363,6 +363,13 @@
         <div class="panel-title">🤖 LLM 建议 / 確認</div>
         
         <div class="form-row">
+            <div class="form-group" style="flex: 1;">
+                <label>策略名稱 <span style="color: #666; font-size: 12px;">(可修改)</span></label>
+                <input type="text" id="previewName" placeholder="策略名稱" style="width: 100%;">
+            </div>
+        </div>
+        
+        <div class="form-row">
             <div class="form-group" style="flex: 0 0 200px;">
                 <label>期貨代碼</label>
                 <select id="previewSymbol">
@@ -438,6 +445,9 @@
     </div>
 </div>
 
+{% endblock %}
+
+{% block extra_js %}
 <script>
 function showInputPanel() {
     document.getElementById('inputPanel').classList.remove('hidden');
@@ -495,6 +505,7 @@ async function generatePreview() {
         if (data.success) {
             // 填充下视窗
             document.getElementById('previewSymbol').value = data.data.symbol;
+            document.getElementById('previewName').value = data.data.suggested_name || ('策略_' + data.data.symbol);
             document.getElementById('previewTimeframe').value = data.data.timeframe;
             document.getElementById('previewQuantity').value = data.data.quantity;
             document.getElementById('previewStopLoss').value = data.data.stop_loss || '';
@@ -527,7 +538,16 @@ async function confirmStrategy() {
     
     const verificationContent = document.getElementById('verificationContent');
     
-    // 顯示進度條
+    // 顯示進度條（假進度動畫）
+    let currentProgress = 0;
+    const progressSteps = [
+        { percent: 15, message: '🔄 正在建立策略...', step: 1 },
+        { percent: 35, message: '📝 正在生成策略程式碼...', step: 2 },
+        { percent: 55, message: '🔍 正在進行 LLM 審查...', step: 3 },
+        { percent: 75, message: '📊 正在進行歷史回測...', step: 4 },
+        { percent: 90, message: '📈 正在整理結果...', step: 5 }
+    ];
+    
     verificationContent.innerHTML = `
         <div class="progress-container">
             <div class="progress-message" id="progressMessage">正在準備...</div>
@@ -544,29 +564,23 @@ async function confirmStrategy() {
         </div>
     `;
     
-    // 模擬進度更新
-    let currentStep = 0;
-    const steps = [
-        { step: 1, message: '🔄 正在建立策略...', percent: 10 },
-        { step: 2, message: '📝 正在生成策略程式碼...', percent: 30 },
-        { step: 3, message: '🔍 正在進行 LLM 審查 (Stage 1)...', percent: 50 },
-        { step: 4, message: '📊 正在進行歷史回測 (Stage 2)...', percent: 70 },
-        { step: 5, message: '📈 正在生成回測圖表...', percent: 90 }
-    ];
-    
-    // 自動更新進度
+    // 啟動假進度動畫
+    let stepIndex = 0;
     const progressInterval = setInterval(() => {
-        if (currentStep < steps.length) {
-            updateProgressUI(steps[currentStep].step, steps[currentStep].message, steps[currentStep].percent);
-            currentStep++;
+        if (stepIndex < progressSteps.length) {
+            const step = progressSteps[stepIndex];
+            updateProgressUI(step.step, step.message, step.percent);
+            stepIndex++;
         }
-    }, 3000);
+    }, 3000); // 每 3 秒更新一次進度
     
     try {
+        // 呼叫普通 JSON API（非 SSE）
         const response = await fetch('/api/strategies/confirm', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
+                name: document.getElementById('previewName').value,
                 symbol: document.getElementById('previewSymbol').value,
                 prompt: document.getElementById('previewPrompt').value,
                 direction: document.getElementById('previewDirection').value,
@@ -577,13 +591,21 @@ async function confirmStrategy() {
             })
         });
         
-        // 清除進度計時器
-        clearInterval(progressInterval);
-        
         const data = await response.json();
         
-        // 顯示最終結果
-        displayResult(data);
+        // 停止假進度動畫
+        clearInterval(progressInterval);
+        
+        // 完成時跳到 100%
+        updateProgressUI(5, '✅ 完成！', 100);
+        
+        // 稍微延遲一下再顯示結果，讓用戶看到 100%
+        setTimeout(() => {
+            displayResult(data);
+            btn.disabled = false;
+            btn.textContent = '✅ 確認并生成策略代码';
+        }, 500);
+        
     } catch (error) {
         clearInterval(progressInterval);
         verificationContent.innerHTML = '<div class="result-error">請求失敗: ' + error.message + '</div>';

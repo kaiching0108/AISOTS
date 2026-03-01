@@ -111,6 +111,10 @@ class AITradingSystem:
         
         # 自動 LLM Review 排程器
         self.auto_review_scheduler = None
+        
+        # 模擬價格趨勢追蹤（用於 _simulate_price_updates）
+        self._price_trend = {}  # 記錄每個 symbol 的趨勢方向: 1=上漲, -1=下跌
+        self._trend_count = {}  # 記錄趨勢持續了多少根 K 棒
     
     @property
     def llm_provider(self):
@@ -131,9 +135,9 @@ class AITradingSystem:
         # 取得部位
         position = self.position_mgr.get_position(strategy.id)
         
-        # 從策略參數取得停損止盈點數
-        stop_loss = strategy.params.get("stop_loss", 0)
-        take_profit = strategy.params.get("take_profit", 0)
+        # 從策略參數取得停損止盈點數（並進行型別轉換）
+        stop_loss = int(strategy.params.get("stop_loss", 0)) if strategy.params.get("stop_loss") else 0
+        take_profit = int(strategy.params.get("take_profit", 0)) if strategy.params.get("take_profit") else 0
         
         # 根據訊號執行
         if signal == "buy" and not position:
@@ -164,6 +168,9 @@ class AITradingSystem:
         if not self.shioaji.login():
             self.logger.error("Shioaji 登入失敗")
             return False
+        
+        # 設置策略運行器參考（讓模擬模式下能獲取動態價格）
+        self.shioaji.set_strategy_runner(self.strategy_runner)
         
         # 從 Shioaji 取得可用期貨代碼
         self.trading_tools.update_valid_symbols()
@@ -295,6 +302,10 @@ class AITradingSystem:
         """主迴圈 - 定時任務"""
         check_interval = self.config.trading.check_interval
         
+        # 模擬模式下，記錄上次價格更新時間
+        last_price_update = datetime.now()
+        price_update_interval = 60  # 每60秒更新一次價格
+        
         while self.is_running:
             try:
                 # 1. 檢查連線
@@ -304,6 +315,13 @@ class AITradingSystem:
                         self.logger.error("重連失敗")
                         await asyncio.sleep(30)
                         continue
+                
+                # 模擬模式下，定時生成新價格數據
+                if self.config.shioaji.simulation or self.shioaji.skip_login:
+                    now = datetime.now()
+                    if (now - last_price_update).seconds >= price_update_interval:
+                        await self._simulate_price_updates()
+                        last_price_update = now
                 
                 # 2. 更新部位價格
                 await self._update_positions()
@@ -344,9 +362,17 @@ class AITradingSystem:
         
         price_map = {}
         for pos in positions:
-            contract = self.shioaji.get_contract(pos.symbol)
-            if contract:
-                price_map[pos.symbol] = contract.last_price
+            # 從 strategy_runner 獲取最新市場價格（而非 get_contract().last_price）
+            market_data = self.strategy_runner.get_market_data(pos.symbol)
+            if market_data and market_data.close_prices:
+                # 使用最新收盤價作為當前價格
+                current_price = market_data.close_prices[-1]
+                price_map[pos.symbol] = current_price
+                logger.debug(f"停損檢查價格: {pos.symbol} @ {current_price:.2f}")
+            else:
+                # 如果沒有市場數據，使用部位進場價作為備選
+                price_map[pos.symbol] = pos.entry_price
+                logger.warning(f"無市場數據，使用進場價: {pos.symbol} @ {pos.entry_price}")
         
         # 更新並檢查是否觸發停損止盈
         triggered = self.position_mgr.update_prices(price_map)
@@ -356,22 +382,136 @@ class AITradingSystem:
             strategy_id = t["strategy_id"]
             exit_price = t["exit_price"]
             
-            # 平倉
-            result = self.position_mgr.close_position(strategy_id, exit_price)
+            # 使用 trading_tools.close_position 進行完整平倉流程（包含訂單記錄和交易日誌）
+            result_msg = self.trading_tools.close_position(strategy_id, price=exit_price)
             
-            if result:
-                emoji = "🔴" if result["pnl"] < 0 else "🟢"
-                self.notifier.send_message(
-                    f"{emoji} *{'停損' if t['type'] == 'stop_loss' else '止盈'}*\n"
-                    f"策略: {result['strategy_name']}\n"
-                    f"平倉價: {exit_price}\n"
-                    f"損益: {result['pnl']:+,.0f}"
-                )
+            # close_position 已經發送通知，這裡只需記錄日誌
+            if "平倉完成" in result_msg:
+                logger.info(f"停損/止盈平倉成功: {strategy_id}, 訊息: {result_msg[:100]}...")
+            else:
+                logger.warning(f"停損/止盈平倉可能失敗: {strategy_id}, 訊息: {result_msg}")
     
     async def _check_stop_loss_take_profit(self) -> None:
         """檢查停損止盈"""
         # 這個功能已經整合到 _update_positions 中
         pass
+    
+    async def _simulate_price_updates(self) -> None:
+        """模擬模式下生成新價格數據
+        
+        為每個已啟用策略的 symbol 生成新的 K 棒數據，
+        驅動策略持續分析並產生交易訊號。
+        
+        注意：模擬環境下所有策略統一按 1分鐘頻率生成 K 棒，
+        策略的 timeframe 參數只影響策略內部邏輯，不影響數據生成頻率。
+        
+        價格生成邏輯：
+        - 模擬真實市場的趨勢特性（上漲/下跌有慣性）
+        - 30% 概率反轉趨勢
+        - 趨勢持續越久，波動越大但久了會回調
+        """
+        try:
+            import random
+            from src.api.shioaji_client import ShioajiClient
+            
+            # 取得所有已啟用策略
+            enabled_strategies = self.strategy_mgr.get_enabled_strategies()
+            
+            if not enabled_strategies:
+                return
+            
+            now = datetime.now()
+            
+            for strategy in enabled_strategies:
+                symbol = strategy.symbol
+                
+                # 取得策略的 timeframe 並獲取對應波動率
+                timeframe = strategy.params.get("timeframe", "1h") if strategy.params else "1h"
+                base_volatility = ShioajiClient.get_timeframe_volatility(timeframe)
+                
+                # 取得現有市場數據
+                market_data = self.strategy_runner.get_market_data(symbol)
+                
+                if not market_data or not market_data.close_prices:
+                    continue
+                
+                # 取得最後一根 K 棒的收盤價作為基礎
+                last_close = market_data.close_prices[-1]
+                
+                # ===== 趨勢模擬邏輯（根據 timeframe 調整波動率）=====
+                # 檢查是否需要開始新趨勢（30% 概率反轉）
+                if symbol not in self._price_trend or random.random() < 0.3:
+                    # 開始新趨勢：1=上漲, -1=下跌
+                    self._price_trend[symbol] = random.choice([-1, 1])
+                    self._trend_count[symbol] = 0
+                    self.logger.debug(f"{symbol} ({timeframe}) 開始新趨勢: {'上漲' if self._price_trend[symbol] > 0 else '下跌'}")
+                
+                trend = self._price_trend[symbol]
+                self._trend_count[symbol] += 1
+                trend_duration = self._trend_count[symbol]
+                
+                # 基礎變動幅度（根據 timeframe 調整：1m:0.03% ~ 1d:1.2%）
+                base_change = random.uniform(base_volatility, base_volatility * 2.67)
+                
+                # 趨勢加成：趨勢越久，動量越大，但久了會疲態（回調）
+                # 前5根：動量遞增，之後開始回調
+                if trend_duration <= 5:
+                    momentum = 1 + (trend_duration * 0.15)  # 最大 1.75x
+                else:
+                    momentum = 1.75 - ((trend_duration - 5) * 0.1)  # 開始回調
+                    momentum = max(momentum, 0.5)  # 最小 0.5x
+                
+                # 計算價格變動百分比
+                change_pct = trend * base_change * momentum
+                
+                # 加入隨機雜訊（±0.2%）
+                noise = random.uniform(-0.002, 0.002)
+                change_pct += noise
+                
+                # 計算新收盤價（限制為整數）
+                new_close = round(last_close * (1 + change_pct))
+                
+                # 每10根K線或趨勢反轉時記錄波動率資訊
+                if trend_duration <= 1 or trend_duration % 10 == 0:
+                    self.logger.debug(f"{symbol} ({timeframe}) 波動率: {base_volatility*100:.3f}%, 趨勢: {'上漲' if trend > 0 else '下跌'} {trend_duration}根, 價格: {new_close}")
+                
+                # 生成 OHLC（根據趨勢方向調整，限制為整數）
+                if trend > 0:  # 上漲趨勢
+                    new_open = round(last_close * (1 + random.uniform(-0.001, 0.002)))
+                    new_high = round(max(new_open, new_close) * (1 + random.uniform(0.001, 0.003)))
+                    new_low = round(min(new_open, new_close) * (1 - random.uniform(0.001, 0.002)))
+                else:  # 下跌趨勢
+                    new_open = round(last_close * (1 + random.uniform(-0.002, 0.001)))
+                    new_high = round(max(new_open, new_close) * (1 + random.uniform(0.001, 0.002)))
+                    new_low = round(min(new_open, new_close) * (1 - random.uniform(0.002, 0.003)))
+                
+                new_volume = random.randint(1000, 8000)
+                
+                # 更新市場數據快取
+                self.strategy_runner.update_market_data(
+                    symbol=symbol,
+                    timestamp=now,
+                    open_price=new_open,
+                    high=new_high,
+                    low=new_low,
+                    close=new_close,
+                    volume=new_volume
+                )
+                
+                self.logger.debug(f"模擬價格更新: {symbol} @ {new_close:.2f} (趨勢: {'上漲' if trend > 0 else '下跌'} {trend_duration}根)")
+            
+            # 收集各策略的 timeframe 資訊用於日誌
+            timeframe_info = []
+            for s in enabled_strategies:
+                tf = s.params.get("timeframe", "1h") if s.params else "1h"
+                vol = ShioajiClient.get_timeframe_volatility(tf)
+                timeframe_info.append(f"{s.symbol}({tf}:{vol*100:.2f}%)")
+            
+            self.logger.info(f"已為 {len(enabled_strategies)} 個策略生成模擬價格更新 "
+                           f"(1分鐘頻率，根據 timeframe 調整波動率: {', '.join(timeframe_info)})")
+            
+        except Exception as e:
+            self.logger.error(f"模擬價格更新失敗: {e}")
     
     def get_help_text(self) -> str:
         """取得說明文字"""
@@ -589,6 +729,16 @@ class AITradingSystem:
             strategy_id = confirm_delete_match.group(1).upper()
             self.logger.info(f"Confirming delete strategy: {strategy_id}")
             result = self.trading_tools.confirm_delete_strategy(strategy_id)
+            self._add_to_history(command, result)
+            return result
+        
+        # 直接處理 confirm enable 命令（啟用新策略並強制平倉舊策略部位）
+        confirm_enable_match = re.match(r'^confirm enable\s+(\w+)$', command_stripped)
+        
+        if confirm_enable_match:
+            strategy_id = confirm_enable_match.group(1).upper()
+            self.logger.info(f"Confirming enable strategy with close: {strategy_id}")
+            result = self.trading_tools.confirm_enable_with_close(strategy_id)
             self._add_to_history(command, result)
             return result
         

@@ -11,7 +11,7 @@
 - 📈 **自我優化系統** - 設定目標 → LLM 設計策略 → 執行 → 績效分析 → LLM 審查優化 → 達成目標
 - 🔔 **Telegram 通知** - 交易提醒、风控警告即时推送（仅通知，不接受命令）
 - 🌐 **Web 界面** - **主要操作平台**，图形化管理策略、部位、回测，无需记忆指令
-- 📊 **多種 LLM 支援** - Ollama, OpenAI, Anthropic, DeepSeek, OpenRouter
+- 📊 **多種 LLM 支援** - Ollama, OpenAI, Anthropic, OpenRouter
 - 🛡️ **風控機制** - 單日虧損、最大部位、下單頻率限制
 - 💾 **資料持久化** - JSON 格式儲存策略、部位、訂單、訊號
 
@@ -274,7 +274,7 @@ AISOTS/
 - pandas_ta
 - backtesting.py
 - python-telegram-bot
-- LLM (Ollama/OpenAI/Anthropic/DeepSeek)
+- LLM (Ollama/OpenAI/Anthropic)
 
 ## 版本資訊
 

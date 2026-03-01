@@ -28,6 +28,9 @@ def create_web_app(trading_tools, llm_provider=None):
     from src.web.routes import status, strategies, positions, risk, backtest
     from src.web.routes import create
     from src.web.routes import config
+    from src.web.routes import orders
+    from src.web.routes import trade_logs
+    from src.web.routes import performance
     
     app.register_blueprint(status.bp)
     app.register_blueprint(strategies.bp)
@@ -36,6 +39,9 @@ def create_web_app(trading_tools, llm_provider=None):
     app.register_blueprint(backtest.bp)
     app.register_blueprint(create.create_bp)
     app.register_blueprint(config.bp)
+    app.register_blueprint(orders.bp)
+    app.register_blueprint(trade_logs.bp)
+    app.register_blueprint(performance.bp)
     
     # 提供 workspace 目录下的文件访问（如回测图表）
     import os
@@ -62,6 +68,11 @@ def create_web_app(trading_tools, llm_provider=None):
     def positions_page():
         """部位列表頁面"""
         return render_template('positions.html')
+    
+    @app.route('/orders')
+    def orders_page():
+        """訂單列表頁面"""
+        return render_template('orders.html')
     
     @app.route('/config')
     def config_page():

@@ -3,6 +3,7 @@ from functools import wraps
 import asyncio
 import logging
 import json
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -61,9 +62,9 @@ def preview_strategy():
         prompt = data.get('prompt', '')
         direction = data.get('direction', 'long')  # 預設做多
         timeframe = data.get('timeframe', '15m')
-        stop_loss = data.get('stop_loss')
-        take_profit = data.get('take_profit')
-        quantity = data.get('quantity', 1)
+        stop_loss = int(data.get('stop_loss', 0)) if data.get('stop_loss') else None
+        take_profit = int(data.get('take_profit', 0)) if data.get('take_profit') else None
+        quantity = int(data.get('quantity', 1))
         
         if not prompt:
             return jsonify({
@@ -157,9 +158,9 @@ def preview_strategy():
             
             # 如果用户已经提供了部分参数，优先使用用户的参数
             final_timeframe = timeframe if timeframe != '15m' else inferred_timeframe
-            final_stop_loss = stop_loss if stop_loss else inferred_stop_loss
-            final_take_profit = take_profit if take_profit else inferred_take_profit
-            final_quantity = quantity if quantity != 1 else inferred_quantity
+            final_stop_loss = int(stop_loss) if stop_loss else inferred_stop_loss
+            final_take_profit = int(take_profit) if take_profit else inferred_take_profit
+            final_quantity = int(quantity) if quantity != 1 else inferred_quantity
             
             # 使用 LLM 生成的策略描述作为 prompt
             full_prompt = content
@@ -168,6 +169,7 @@ def preview_strategy():
                 "success": True,
                 "data": {
                     "symbol": symbol,
+                    "suggested_name": f"策略_{symbol}",
                     "prompt": full_prompt,
                     "direction": direction,
                     "timeframe": final_timeframe,
@@ -239,11 +241,13 @@ def confirm_strategy():
         
         symbol = data.get('symbol', 'TMF').upper()
         prompt = data.get('prompt', '')
-        direction = data.get('direction', 'long')  # 預設做多
+        direction = data.get('direction', 'long')
         timeframe = data.get('timeframe', '15m')
-        stop_loss = data.get('stop_loss') or 30
-        take_profit = data.get('take_profit') or 50
-        quantity = data.get('quantity', 1)
+        stop_loss = int(data.get('stop_loss', 0)) or 30
+        take_profit = int(data.get('take_profit', 0)) or 50
+        quantity = int(data.get('quantity', 1))
+        # 接受用户自定义的策略名称，若未提供则使用默认值
+        strategy_name = data.get('name') or f"策略_{symbol}"
         
         if not prompt:
             return jsonify({
@@ -260,15 +264,7 @@ def confirm_strategy():
             }), 500
         
         # 直接设置 _pending_strategy，使用用户在界面确认的参数
-        # 推断策略名称
-        import re
-        goal_match = re.search(r'每日|賺|赚|目標|目标', prompt)
-        if goal_match:
-            strategy_name = f"收益策略_{symbol}"
-        else:
-            strategy_name = f"策略_{symbol}"
-        
-        # 构建参数
+        # 使用用户提供的策略名称或默认值
         params = {
             "name": strategy_name,
             "symbol": symbol,
@@ -294,12 +290,9 @@ def confirm_strategy():
             logger.info(f"confirm_create_strategy returned: {result[:500] if result else 'None'}...")
         except Exception as e:
             logger.error(f"Confirm strategy error: {e}")
-            import traceback
-            traceback.print_exc()
             return jsonify({
                 "success": False,
-                "message": f"確認策略失敗: {str(e)}",
-                "detail": traceback.format_exc()
+                "message": f"確認策略失敗: {str(e)}"
             }), 500
         
         # 如果 result 為 None 或空
@@ -392,19 +385,24 @@ def confirm_strategy():
         }
         
         if chart_path:
-            # 转换路径
+            # 转换路径（支持相对路径和绝对路径）
             chart_path_str = str(chart_path).replace("\\", "/")
-            if "workspace" in chart_path_str:
-                chart_path_str = chart_path_str.split("workspace")[-1]
-                chart_path_str = f"/workspace{chart_path_str}"
             
-            # 讀取 HTML 文件內容
+            if "workspace/" in chart_path_str:
+                # 绝对路径：提取 workspace 之后部分
+                chart_path_str = chart_path_str.split("workspace/")[-1]
+                chart_path_str = f"/workspace/{chart_path_str}"
+            elif not chart_path_str.startswith("workspace/") and not chart_path_str.startswith("/workspace/"):
+                # 相对路径（如 backtests/xxx.html）：添加 /workspace/ 前缀
+                chart_path_str = f"/workspace/{chart_path_str}"
+            
+            # 读取 HTML 文件内容
             try:
                 import os
-                # 嘗試多個可能的路徑
+                # 尝试多个可能的路径
                 possible_paths = [
                     chart_path_str.replace("/workspace/", "workspace/"),
-                    chart_path_str.replace("/workspace/", ""),
+                    chart_path_str.lstrip("/"),
                     str(chart_path)
                 ]
                 
@@ -417,11 +415,15 @@ def confirm_strategy():
                         break
                 
                 if html_content:
-                    response_data["chart_html"] = html_content
-                    # 也返回 chart_path 供 iframe 使用
+                    # 不再返回完整的 HTML 内容（太大导致 JSON 解析失败）
+                    # 只返回 chart_path，让前端通过 URL 加载
+                    # response_data["chart_html"] = html_content  # 已移除
                     response_data["chart_path"] = chart_path_str
+                    logger.info(f"Chart path set for iframe: {chart_path_str}")
             except Exception as e:
                 logger.warning(f"Failed to read HTML chart: {e}")
+                # 即使读取失败，也返回 chart_path
+                response_data["chart_path"] = chart_path_str
                 # 即使读取失败，也返回路径供 iframe 使用
                 response_data["chart_path"] = chart_path_str
         
@@ -448,173 +450,3 @@ def confirm_strategy():
             "success": False,
             "message": f"确认策略失败: {str(e)}"
         }), 500
-
-
-@create_bp.route('/api/strategies/create-stream', methods=['POST'])
-def create_strategy_stream():
-    """SSE 串流建立策略（包含進度顯示）"""
-    
-    def generate():
-        try:
-            data = request.get_json()
-            
-            symbol = data.get('symbol', 'TMF').upper()
-            prompt = data.get('prompt', '')
-            timeframe = data.get('timeframe', '15m')
-            stop_loss = data.get('stop_loss') or 30
-            take_profit = data.get('take_profit') or 50
-            quantity = data.get('quantity', 1)
-            
-            if not prompt:
-                yield "event: error\ndata: 請輸入策略提示詞\n\n"
-                return
-            
-            trading_tools = get_trading_tools()
-            if not trading_tools:
-                yield "event: error\ndata: 系統未初始化\n\n"
-                return
-            
-            # 步驟 1: 建立策略參數
-            import re
-            goal_match = re.search(r'每日|賺|赚|目標|目标', prompt)
-            strategy_name = f"收益策略_{symbol}" if goal_match else f"策略_{symbol}"
-            
-            params = {
-                "name": strategy_name,
-                "symbol": symbol,
-                "prompt": prompt,
-                "timeframe": timeframe,
-                "stop_loss": stop_loss,
-                "take_profit": take_profit,
-                "quantity": quantity,
-                "goal": None,
-                "goal_unit": "daily"
-            }
-            
-            trading_tools._pending_strategy = params
-            trading_tools._awaiting_confirm = True
-            
-            # 發送進度: 開始建立策略
-            yield "event: progress\ndata: " + json.dumps({
-                "step": 1,
-                "total": 5,
-                "message": "🔄 正在建立策略...",
-                "percent": 10
-            }) + "\n\n"
-            
-            # 發送進度: 生成策略代碼
-            yield "event: progress\ndata: " + json.dumps({
-                "step": 2,
-                "total": 5,
-                "message": "📝 正在生成策略程式碼...",
-                "percent": 30
-            }) + "\n\n"
-            
-            # 調用 confirm_create_strategy 並捕捉進度
-            try:
-                result = trading_tools.confirm_create_strategy(confirmed=True)
-            except Exception as e:
-                logger.error(f"Confirm strategy error: {e}")
-                import traceback
-                traceback.print_exc()
-                yield "event: error\ndata: " + str(e) + "\n\n"
-                return
-            
-            # 發送進度: LLM 審查
-            yield "event: progress\ndata: " + json.dumps({
-                "step": 3,
-                "total": 5,
-                "message": "🔍 正在進行 LLM 審查 (Stage 1)...",
-                "percent": 50
-            }) + "\n\n"
-            
-            # 發送進度: 回測
-            yield "event: progress\ndata: " + json.dumps({
-                "step": 4,
-                "total": 5,
-                "message": "📊 正在進行歷史回測 (Stage 2)...",
-                "percent": 70
-            }) + "\n\n"
-            
-            # 發送進度: 生成圖表
-            yield "event: progress\ndata: " + json.dumps({
-                "step": 5,
-                "total": 5,
-                "message": "📈 正在生成回測圖表...",
-                "percent": 90
-            }) + "\n\n"
-            
-            # 解析結果
-            verification_passed = "通過" in result or "通過驗證" in result or "已建立" in result or "已建立並通過驗證" in result
-            verification_failed = "失敗" in result or "未通過" in result
-            
-            strategy_id_match = re.search(r'ID[:：]\s*([A-Z]+\d+)', result)
-            strategy_id = strategy_id_match.group(1) if strategy_id_match else None
-            
-            name_match = re.search(r'名稱[:：]\s*(.+)', result)
-            strategy_name_result = name_match.group(1).strip() if name_match else strategy_name
-            
-            stage1_error = None
-            stage2_error = None
-            
-            if verification_failed:
-                if "原因：" in result:
-                    error_match = re.search(r'原因[：:]\s*(.+)', result)
-                    if error_match:
-                        stage1_error = error_match.group(1).strip()
-                if not stage1_error:
-                    stage1_error = result[:200] if len(result) > 200 else result
-            
-            chart_path = None
-            verification_result = {
-                "stage1_passed": verification_passed,
-                "stage1_error": stage1_error,
-                "stage2_passed": verification_passed,
-                "stage2_error": stage2_error,
-            }
-            
-            if verification_passed and strategy_id:
-                try:
-                    backtest_result = trading_tools.backtest_strategy(strategy_id)
-                    if isinstance(backtest_result, dict):
-                        chart_path = backtest_result.get("chart_path")
-                        if backtest_result.get("metrics"):
-                            verification_result["trade_count"] = backtest_result["metrics"].get("trade_count", 0)
-                            verification_result["win_rate"] = backtest_result["metrics"].get("win_rate", 0)
-                            verification_result["total_return"] = backtest_result["metrics"].get("total_return", 0)
-                except Exception as e:
-                    logger.warning(f"Backtest after confirm failed: {e}")
-            
-            response_data = {
-                "strategy_id": strategy_id,
-                "name": strategy_name_result,
-                "verification": verification_result
-            }
-            
-            if chart_path:
-                chart_path = chart_path.replace("\\", "/")
-                if "workspace" in chart_path:
-                    chart_path = chart_path.split("workspace")[-1]
-                    chart_path = f"/workspace{chart_path}"
-                response_data["chart_path"] = chart_path
-            
-            # 發送完成結果
-            if verification_passed:
-                yield "event: complete\ndata: " + json.dumps({
-                    "success": True,
-                    "data": response_data
-                }) + "\n\n"
-            else:
-                yield "event: complete\ndata: " + json.dumps({
-                    "success": False,
-                    "message": "策略驗證失敗",
-                    "data": response_data
-                }) + "\n\n"
-                
-        except Exception as e:
-            logger.error(f"SSE error: {e}")
-            import traceback
-            traceback.print_exc()
-            yield "event: error\ndata: " + str(e) + "\n\n"
-    
-    return Response(generate(), mimetype='text/event-stream')

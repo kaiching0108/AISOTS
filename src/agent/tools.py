@@ -56,8 +56,14 @@ class TradingTools:
         
         self._pending_delete: Optional[Dict[str, Any]] = None
         
+        self._pending_enable: Optional[Dict[str, Any]] = None  # 啟用策略時的待確認狀態
+        
         self._signal_recorder = None
         self._performance_analyzer = None
+        
+        # 交易日誌儲存
+        from src.storage.trade_log_store import TradeLogStore
+        self.trade_log_store = TradeLogStore()
     
     def _get_signal_recorder(self):
         """取得訊號記錄器（lazy loading）"""
@@ -210,7 +216,7 @@ K線週期: {strategy.params.get('timeframe', 'N/A')}
         return text
     
     def enable_strategy(self, strategy_id: str) -> str:
-        """啟用策略"""
+        """啟用策略 (含檢查舊策略部位)"""
         logger.info(f"Enable strategy called: {strategy_id}")
         
         # 找到要 enable 的策略
@@ -247,6 +253,49 @@ ID: {strategy_id}
             if s.symbol == strategy.symbol and s.id != strategy_id and s.enabled
         ]
         
+        # 檢查舊策略是否有部位
+        strategies_with_positions = []
+        for s in same_symbol_strategies:
+            position = self.position_mgr.get_position(s.id)
+            if position and position.quantity > 0:
+                strategies_with_positions.append({
+                    "strategy": s,
+                    "position": position
+                })
+        
+        # 如果有舊策略帶部位，返回確認請求
+        if strategies_with_positions:
+            old_strategy = strategies_with_positions[0]["strategy"]
+            position = strategies_with_positions[0]["position"]
+            
+            # 儲存待確認資訊
+            self._pending_enable = {
+                "strategy_id": strategy_id,
+                "old_strategy_id": old_strategy.id,
+                "symbol": position.symbol,
+                "quantity": position.quantity,
+                "direction": position.direction,
+                "pnl": position.pnl,
+                "entry_price": position.entry_price,
+                "current_price": position.current_price
+            }
+            
+            return f"""
+⚠️ *警告：舊策略仍有部位*
+─────────────────
+策略: {old_strategy.id} ({old_strategy.name})
+部位: {position.symbol} {position.direction} {position.quantity}口
+進場價: {position.entry_price}
+現價: {position.current_price}
+損益: {position.pnl:+,.0f}
+
+啟用新策略前，必須先強制平倉舊策略部位。
+
+請輸入: `confirm enable {strategy_id}` 確認強制平倉舊策略並啟用
+輸入: `cancel` 取消
+"""
+        
+        # 舊策略無部位，直接停用
         disabled = []
         for s in same_symbol_strategies:
             self.strategy_mgr.disable_strategy(s.id)
@@ -277,6 +326,135 @@ ID: {strategy_id}
             if disabled:
                 result += f"\n\n⚠️ 已自動停用以下舊版本：\n" + "\n".join(f"  - {d}" for d in disabled)
             return result
+        return f"❌ 啟用失敗: {strategy_id}"
+    
+    def confirm_enable_with_close(self, strategy_id: str) -> str:
+        """確認啟用策略 (強制平倉舊策略部位)"""
+        
+        # 檢查是否有待確認的啟用請求
+        if not self._pending_enable or self._pending_enable.get("strategy_id") != strategy_id:
+            return f"❌ 沒有待確認的啟用請求: {strategy_id}"
+        
+        pending = self._pending_enable
+        old_strategy_id = pending["old_strategy_id"]
+        
+        close_success = False
+        close_error = None
+        
+        try:
+            # 執行強制平倉舊策略部位
+            position = self.position_mgr.get_position(old_strategy_id)
+            if position and position.quantity > 0:
+                logger.info(f"準備平倉舊策略 {old_strategy_id}: {position.symbol} {position.direction} {position.quantity}口")
+                
+                # 取得現價
+                contract = self.api.get_contract(position.symbol)
+                current_price = contract.last_price if contract and hasattr(contract, 'last_price') and contract.last_price else 0
+                
+                if current_price > 0:
+                    # 強制平倉
+                    close_action = "Sell" if position.direction == "Buy" else "Buy"
+                    
+                    # 1. 創建訂單記錄
+                    order = self.order_mgr.create_order(
+                        strategy_id=old_strategy_id,
+                        strategy_name=f"強制平倉-{old_strategy_id}",
+                        symbol=position.symbol,
+                        action=close_action,
+                        quantity=position.quantity,
+                        price=0,  # 市價
+                        price_type="MKT",
+                        reason=f"強制平倉 - 啟用新策略 {strategy_id}"
+                    )
+                    
+                    logger.info(f"下單平倉: {position.symbol} {close_action} {position.quantity}口 @ 市價")
+                    
+                    # 2. 下單平倉
+                    trade = self.api.place_order(
+                        symbol=position.symbol,
+                        action=close_action,
+                        quantity=position.quantity,
+                        price=0  # 市價
+                    )
+                    
+                    if trade:
+                        logger.info(f"下單成功: trade_id={trade.order_id if hasattr(trade, 'order_id') else 'N/A'}")
+                        
+                        # 3. 標記訂單提交
+                        seqno = trade.order.seqno if hasattr(trade, 'order') and hasattr(trade.order, 'seqno') else None
+                        self.order_mgr.submit_order(order.order_id, seqno)
+                        
+                        # 4. 標記訂單成交
+                        filled_price = trade.filled_price if hasattr(trade, 'filled_price') and trade.filled_price else current_price
+                        self.order_mgr.fill_order(order.order_id, filled_price)
+                        
+                        # 5. 更新部位
+                        result = self.position_mgr.close_position(old_strategy_id, current_price)
+                        
+                        if result:
+                            logger.info(f"平倉成功: {old_strategy_id}")
+                            close_success = True
+                            
+                            pnl = position.pnl
+                            emoji = "🟢" if pnl >= 0 else "🔴"
+                            
+                            # 發送通知
+                            self.notifier.send_message(
+                                f"{emoji} *強制平倉舊策略部位*\n"
+                                f"─────────────\n"
+                                f"策略: {old_strategy_id}\n"
+                                f"訂單: {order.order_id}\n"
+                                f"平倉價: {filled_price}\n"
+                                f"損益: {pnl:+,.0f}"
+                            )
+                        else:
+                            close_error = "部位更新失敗"
+                            logger.error(f"平倉失敗: {close_error}")
+                    else:
+                        close_error = "下單失敗 (返回 None)"
+                        logger.error(f"平倉失敗: {close_error}")
+                else:
+                    close_error = f"無法取得現價 (contract={contract}, last_price={contract.last_price if contract else None})"
+                    logger.error(f"平倉失敗: {close_error}")
+            else:
+                logger.info(f"舊策略 {old_strategy_id} 無部位或已平倉")
+                close_success = True  # 視為成功（沒有需要平倉的部位）
+        except Exception as e:
+            close_error = str(e)
+            logger.exception(f"平倉過程發生異常: {e}")
+        
+        # 停用舊策略
+        self.strategy_mgr.disable_strategy(old_strategy_id)
+        
+        # 啟用新策略
+        success = self.strategy_mgr.enable_strategy(strategy_id)
+        
+        # 清除待確認狀態
+        self._pending_enable = None
+        
+        if success:
+            strategy = self.strategy_mgr.get_strategy(strategy_id)
+            params = strategy.params or {}
+            timeframe = params.get("timeframe", "未知")
+            quantity = params.get("quantity", 1)
+            stop_loss = params.get("stop_loss", 0)
+            
+            close_status = "✅ 已強制平倉" if close_success else f"❌ 平倉失敗: {close_error}"
+            
+            return f"""✅ *{strategy_id} 策略已啟動！*
+────────────────────
+📌 策略名稱：{strategy.name}
+📌 期貨代碼：{strategy.symbol}（{self.get_futures_name(strategy.symbol)}）
+📌 K線週期：{timeframe}
+📌 交易口數：{quantity}口
+📌 停損：{stop_loss}點
+
+{close_status} 舊策略 {old_strategy_id} ({pending['quantity']}口)
+損益: {pending['pnl']:+,.0f}
+
+────────────────────
+✅ 策略已啟動完成，無需其他操作！"""
+        
         return f"❌ 啟用失敗: {strategy_id}"
     
     def disable_strategy(self, strategy_id: str) -> str:
@@ -317,36 +495,11 @@ ID: {strategy_id}
         position = self.position_mgr.get_position(strategy_id)
         
         if position and position.quantity > 0:
-            # 取得現價
-            contract = self.api.get_contract(position.symbol)
-            current_price = contract.last_price if contract else 0
+            # 使用 close_position 方法進行平倉（會自動記錄訂單和交易日誌）
+            result = self.close_position(strategy_id, price=0)
             
-            if current_price > 0:
-                # 強制平倉
-                close_action = "Sell" if position.direction == "Buy" else "Buy"
-                
-                # 下單平倉
-                self.api.place_order(
-                    symbol=position.symbol,
-                    action=close_action,
-                    quantity=position.quantity,
-                    price=0  # 市價
-                )
-                
-                # 更新部位
-                result = self.position_mgr.close_position(strategy_id, current_price)
-                
-                pnl = position.pnl
-                emoji = "🟢" if pnl >= 0 else "🔴"
-                
-                # 發送通知
-                self.notifier.send_message(
-                    f"{emoji} *強制平倉並停用策略*\n"
-                    f"─────────────\n"
-                    f"策略: {strategy_id}\n"
-                    f"平倉價: {current_price}\n"
-                    f"損益: {pnl:+,.0f}"
-                )
+            # 發送通知
+            self.notifier.send_message(result)
         
         # 停用策略
         self.strategy_mgr.disable_strategy(strategy_id)
@@ -541,34 +694,10 @@ ID: {strategy_id}
             quantity = position.quantity
             direction = position.direction
         
-        # 執行強制平倉
+        # 執行強制平倉（使用 close_position 方法確保訂單記錄完整）
         try:
-            contract = self.api.get_contract(symbol)
-            current_price = contract.last_price if contract else 0
-            
-            if current_price > 0:
-                close_action = "Sell" if direction == "Buy" else "Buy"
-                
-                self.api.place_order(
-                    symbol=symbol,
-                    action=close_action,
-                    quantity=quantity,
-                    price=0
-                )
-                
-                self.position_mgr.close_position(strategy_id, current_price)
-                
-                position = self.position_mgr.get_position(strategy_id)
-                pnl = position.pnl if position else 0
-                emoji = "🟢" if pnl >= 0 else "🔴"
-                
-                self.notifier.send_message(
-                    f"{emoji} *強制平倉*\n"
-                    f"─────────────\n"
-                    f"策略: {strategy_id}\n"
-                    f"平倉價: {current_price}\n"
-                    f"損益: {pnl:+,.0f}"
-                )
+            result = self.close_position(strategy_id, price=0)
+            self.notifier.send_message(result)
         except Exception as e:
             logger.error(f"強制平倉失敗: {e}")
             return f"❌ 強制平倉失敗: {str(e)}"
@@ -979,6 +1108,7 @@ K線週期: {params['timeframe']}
         self._awaiting_symbol = False
         self._awaiting_confirm = False
         self._current_goal = None
+        self._pending_enable = None  # 清除啟用策略的待確認狀態
         self._clear_create_flow()
     
     def _clear_create_flow(self) -> None:
@@ -1345,6 +1475,14 @@ K線週期: {data['timeframe']}
             stop_loss: 停損點數（0=不啟用）
             take_profit: 止盈點數（0=不啟用）
         """
+        # 防禦性型別轉換 - 確保停損止盈為整數
+        try:
+            stop_loss = int(stop_loss) if stop_loss else 0
+            take_profit = int(take_profit) if take_profit else 0
+        except (ValueError, TypeError) as e:
+            logger.error(f"停損或止盈參數型別錯誤: stop_loss={stop_loss}, take_profit={take_profit}, error={e}")
+            return f"❌ 停損或止盈參數型別錯誤，請檢查策略設定"
+        
         # 取得策略資訊
         strategy = self.strategy_mgr.get_strategy(strategy_id)
         if not strategy:
@@ -1369,6 +1507,15 @@ K線週期: {data['timeframe']}
         if not risk_check["passed"]:
             msg = f"❌ 風控擋單: {risk_check['reason']}"
             logger.warning(msg)
+            # 記錄交易日誌
+            self.trade_log_store.add_log(
+                event_type="RISK_BLOCKED",
+                strategy_id=strategy_id,
+                strategy_name=strategy_name,
+                symbol=symbol,
+                message=msg,
+                details={"reason": risk_check['reason'], "action": action, "quantity": quantity}
+            )
             return msg
         
         # 建立訂單
@@ -1395,12 +1542,18 @@ K線週期: {data['timeframe']}
             
             # 取得成交價
             filled_price = price
-            if hasattr(trade, 'price'):
+            if hasattr(trade, 'filled_price'):
+                filled_price = trade.filled_price
+            elif hasattr(trade, 'price'):
                 filled_price = trade.price
             elif price == 0:
                 contract = self.api.get_contract(symbol)
                 if contract:
                     filled_price = contract.last_price
+            
+            # 模擬模式：自動成交
+            if self.api.skip_login or self.api.simulation:
+                self.order_mgr.fill_order(order.order_id, filled_price)
             
             # 建立部位（帶入停損止盈點數）
             signal_action = "buy" if action == "Buy" else "sell"
@@ -1412,7 +1565,7 @@ K線週期: {data['timeframe']}
                 indicators={}
             )
             
-            self.position_mgr.open_position(
+            position = self.position_mgr.open_position(
                 strategy_id=strategy_id,
                 strategy_name=strategy_name,
                 symbol=symbol,
@@ -1423,6 +1576,25 @@ K線週期: {data['timeframe']}
                 take_profit_points=take_profit,
                 signal_id=signal_id,
                 strategy_version=strategy.strategy_version
+            )
+            
+            if position is None:
+                return f"⚠️ 策略 {strategy_id} 已有部位，不開新倉"
+            
+            # 記錄交易日誌
+            self.trade_log_store.add_log(
+                event_type="ORDER_SUCCESS",
+                strategy_id=strategy_id,
+                strategy_name=strategy_name,
+                symbol=symbol,
+                message=f"✅ {strategy_name} {'買進' if action == 'Buy' else '賣出'} {quantity}口 @ {filled_price}",
+                details={
+                    "action": action,
+                    "quantity": quantity,
+                    "price": filled_price,
+                    "stop_loss": stop_loss,
+                    "take_profit": take_profit
+                }
             )
             
             msg = f"""
@@ -1465,7 +1637,19 @@ K線週期: {data['timeframe']}
         if price == 0:
             return "❌ 無法取得現價"
         
-        # 平倉
+        # 建立平倉訂單（在部位平倉前，先建立訂單記錄）
+        close_action = "Sell" if position.direction == "Buy" else "Buy"
+        close_order = self.order_mgr.create_order(
+            strategy_id=strategy_id,
+            strategy_name=position.strategy_name,
+            symbol=position.symbol,
+            action=close_action,
+            quantity=position.quantity,
+            price=price,
+            reason="平倉: 策略訊號或停損止盈"
+        )
+        
+        # 平倉部位
         result = self.position_mgr.close_position(strategy_id, price)
         
         if result:
@@ -1493,17 +1677,49 @@ K線週期: {data['timeframe']}
                     filled_quantity=result["quantity"]
                 )
             
-            # 反向下一口平倉
-            close_action = "Sell" if position.direction == "Buy" else "Buy"
-            self.api.place_order(
+            # 提交平倉訂單
+            self.order_mgr.submit_order(close_order.order_id, None)
+            
+            # 執行 API 下單
+            api_result = self.api.place_order(
                 symbol=position.symbol,
                 action=close_action,
                 quantity=position.quantity,
                 price=price
             )
             
+            # 模擬模式：自動成交
+            if self.api.skip_login or self.api.simulation:
+                self.order_mgr.fill_order(close_order.order_id, price)
+            elif api_result:
+                # 實盤模式且有成交結果
+                filled_price = price
+                if hasattr(api_result, 'filled_price'):
+                    filled_price = api_result.filled_price
+                elif hasattr(api_result, 'price'):
+                    filled_price = api_result.price
+                self.order_mgr.fill_order(close_order.order_id, filled_price)
+            
             pnl = result["pnl"]
             emoji = "🟢" if pnl >= 0 else "🔴"
+            
+            # 記錄交易日誌
+            self.trade_log_store.add_log(
+                event_type="CLOSE_POSITION",
+                strategy_id=strategy_id,
+                strategy_name=result.get('strategy_name', strategy_id),
+                symbol=result.get('symbol', ''),
+                message=f"{emoji} {result.get('strategy_name', strategy_id)} 平倉 {result.get('quantity', 0)}口 @ {price} | 損益: {pnl:+,}",
+                details={
+                    "exit_price": price,
+                    "quantity": result.get('quantity', 0),
+                    "pnl": pnl,
+                    "reason": exit_reason,
+                    "entry_price": position.entry_price if position else 0,
+                    "direction": position.direction if position else "",
+                    "order_id": close_order.order_id
+                }
+            )
             
             msg = f"""
 {emoji} *平倉完成*
@@ -1512,7 +1728,7 @@ K線週期: {data['timeframe']}
 合約: {result['symbol']}
 方向: {close_action} {result['quantity']}口
 平倉價: {price}
-損益: {pnl:+,.0f}
+損益: {pnl:+,}
 """
             self.notifier.send_order_notification({
                 "status": "Filled",
@@ -1525,8 +1741,10 @@ K線週期: {data['timeframe']}
             })
             
             return msg
-        
-        return "❌ 平倉失敗"
+        else:
+            # 平倉失敗，取消訂單
+            self.order_mgr.cancel_order(close_order.order_id)
+            return "❌ 平倉失敗"
     
     # ========== 市場數據工具 ==========
     

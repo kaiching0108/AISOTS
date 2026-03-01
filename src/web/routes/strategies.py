@@ -165,6 +165,46 @@ def enable_strategy(strategy_id):
         tools = current_app.trading_tools
         result = tools.enable_strategy(strategy_id)
         
+        # 檢查是否需要確認（舊策略有部位）
+        if tools._pending_enable and tools._pending_enable.get("strategy_id") == strategy_id:
+            pending = tools._pending_enable
+            return jsonify({
+                "needs_confirmation": True,
+                "title": "確認啟用",
+                "message": f"舊策略 {pending['old_strategy_id']} 仍有 {pending['quantity']}口 部位",
+                "position": {
+                    "symbol": pending['symbol'],
+                    "quantity": pending['quantity'],
+                    "direction": pending['direction'],
+                    "pnl": pending['pnl'],
+                    "entry_price": pending['entry_price'],
+                    "current_price": pending['current_price']
+                },
+                "risks": [
+                    f"強制平倉 {pending['old_strategy_id']} ({pending['quantity']}口 {pending['symbol']})",
+                    f"損益: {pending['pnl']:+,.0f}",
+                    "啟用新策略"
+                ]
+            })
+        
+        return jsonify({
+            "success": "找不到" not in result and "❌" not in result,
+            "message": result
+        })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
+@bp.route('/<strategy_id>/enable', methods=['DELETE'])
+def confirm_enable_strategy(strategy_id):
+    """確認啟用策略（強制平倉舊策略部位）"""
+    try:
+        tools = current_app.trading_tools
+        result = tools.confirm_enable_with_close(strategy_id)
+        
         return jsonify({
             "success": "找不到" not in result and "❌" not in result,
             "message": result

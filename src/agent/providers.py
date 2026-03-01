@@ -34,16 +34,10 @@ class CustomProvider(BaseProvider):
     def __init__(self, config):
         super().__init__(config)
         
-        # 修復 event loop 問題
-        import nest_asyncio
-        nest_asyncio.apply()
-        
         self.base_url = config.base_url or "http://localhost:11434/v1"
         self.api_key = config.api_key or os.environ.get("OPENAI_API_KEY", "")
-        self.client = httpx.AsyncClient(
-            base_url=self.base_url,
-            timeout=120.0
-        )
+        # 注意：不再在 __init__ 中創建 client，而是在每次調用時創建
+        # 這樣可以避免 event loop 綁定問題
     
     async def chat(self, messages: List[Dict[str, str]], **kwargs) -> str:
         """發送聊天請求"""
@@ -59,15 +53,20 @@ class CustomProvider(BaseProvider):
         }
         
         try:
-            response = await self.client.post(
-                "/chat/completions",
-                json=payload,
-                headers=headers
-            )
-            response.raise_for_status()
-            result = response.json()
-            
-            return result["choices"][0]["message"]["content"]
+            # 修復 event loop 問題：每次調用創建新的 client
+            async with httpx.AsyncClient(
+                base_url=self.base_url,
+                timeout=120.0
+            ) as client:
+                response = await client.post(
+                    "/chat/completions",
+                    json=payload,
+                    headers=headers
+                )
+                response.raise_for_status()
+                result = response.json()
+                
+                return result["choices"][0]["message"]["content"]
             
         except httpx.HTTPError as e:
             logger.error(f"Custom provider HTTP error: {e}")
@@ -91,13 +90,18 @@ class CustomProvider(BaseProvider):
         payload = {k: v for k, v in payload.items() if v is not None}
         
         try:
-            response = await self.client.post(
-                "/chat/completions",
-                json=payload,
-                headers=headers
-            )
-            response.raise_for_status()
-            result = response.json()
+            # 修復 event loop 問題：每次調用創建新的 client
+            async with httpx.AsyncClient(
+                base_url=self.base_url,
+                timeout=120.0
+            ) as client:
+                response = await client.post(
+                    "/chat/completions",
+                    json=payload,
+                    headers=headers
+                )
+                response.raise_for_status()
+                result = response.json()
             
             message = result["choices"][0]["message"]
             
@@ -112,7 +116,7 @@ class CustomProvider(BaseProvider):
     
     async def close(self):
         """關閉客戶端"""
-        await self.client.aclose()
+        pass  # client 在 async with 中自動關閉
 
 
 class OpenRouterProvider(BaseProvider):
@@ -122,10 +126,7 @@ class OpenRouterProvider(BaseProvider):
         super().__init__(config)
         self.api_key = config.api_key or os.environ.get("OPENROUTER_API_KEY", "")
         self.base_url = "https://openrouter.ai/api/v1"
-        self.client = httpx.AsyncClient(
-            base_url=self.base_url,
-            timeout=120.0
-        )
+        # 注意：不再在 __init__ 中創建 client，而是在每次調用時創建
     
     async def chat(self, messages: List[Dict[str, str]], **kwargs) -> str:
         headers = {
@@ -142,15 +143,16 @@ class OpenRouterProvider(BaseProvider):
         }
         
         try:
-            response = await self.client.post(
-                "/chat/completions",
-                json=payload,
-                headers=headers
-            )
-            response.raise_for_status()
-            result = response.json()
-            
-            return result["choices"][0]["message"]["content"]
+            async with httpx.AsyncClient(base_url=self.base_url, timeout=120.0) as client:
+                response = await client.post(
+                    "/chat/completions",
+                    json=payload,
+                    headers=headers
+                )
+                response.raise_for_status()
+                result = response.json()
+                
+                return result["choices"][0]["message"]["content"]
             
         except httpx.HTTPError as e:
             logger.error(f"OpenRouter provider error: {e}")
@@ -174,27 +176,28 @@ class OpenRouterProvider(BaseProvider):
         payload = {k: v for k, v in payload.items() if v is not None}
         
         try:
-            response = await self.client.post(
-                "/chat/completions",
-                json=payload,
-                headers=headers
-            )
-            response.raise_for_status()
-            result = response.json()
-            
-            message = result["choices"][0]["message"]
-            
-            return {
-                "content": message.get("content", ""),
-                "tool_calls": message.get("tool_calls", [])
-            }
+            async with httpx.AsyncClient(base_url=self.base_url, timeout=120.0) as client:
+                response = await client.post(
+                    "/chat/completions",
+                    json=payload,
+                    headers=headers
+                )
+                response.raise_for_status()
+                result = response.json()
+                
+                message = result["choices"][0]["message"]
+                
+                return {
+                    "content": message.get("content", ""),
+                    "tool_calls": message.get("tool_calls", [])
+                }
             
         except httpx.HTTPError as e:
             logger.error(f"OpenRouter provider error: {e}")
             raise
     
     async def close(self):
-        await self.client.aclose()
+        pass  # client 在 async with 中自動關閉
 
 
 class OpenAIProvider(BaseProvider):
@@ -204,11 +207,7 @@ class OpenAIProvider(BaseProvider):
         super().__init__(config)
         self.api_key = config.api_key or os.environ.get("OPENAI_API_KEY", "")
         self.base_url = config.base_url or "https://api.openai.com/v1"
-        self.client = httpx.AsyncClient(
-            base_url=self.base_url,
-            timeout=120.0,
-            headers={"Authorization": f"Bearer {self.api_key}"}
-        )
+        # 注意：不再在 __init__ 中創建 client，而是在每次調用時創建
     
     async def chat(self, messages: List[Dict[str, str]], **kwargs) -> str:
         payload = {
@@ -219,12 +218,17 @@ class OpenAIProvider(BaseProvider):
         }
         
         try:
-            response = await self.client.post(
-                "/chat/completions",
-                json=payload
-            )
-            response.raise_for_status()
-            result = response.json()
+            async with httpx.AsyncClient(
+                base_url=self.base_url,
+                timeout=120.0,
+                headers={"Authorization": f"Bearer {self.api_key}"}
+            ) as client:
+                response = await client.post(
+                    "/chat/completions",
+                    json=payload
+                )
+                response.raise_for_status()
+                result = response.json()
             
             return result["choices"][0]["message"]["content"]
             
@@ -244,26 +248,31 @@ class OpenAIProvider(BaseProvider):
         payload = {k: v for k, v in payload.items() if v is not None}
         
         try:
-            response = await self.client.post(
-                "/chat/completions",
-                json=payload
-            )
-            response.raise_for_status()
-            result = response.json()
-            
-            message = result["choices"][0]["message"]
-            
-            return {
-                "content": message.get("content", ""),
-                "tool_calls": message.get("tool_calls", [])
-            }
+            async with httpx.AsyncClient(
+                base_url=self.base_url,
+                timeout=120.0,
+                headers={"Authorization": f"Bearer {self.api_key}"}
+            ) as client:
+                response = await client.post(
+                    "/chat/completions",
+                    json=payload
+                )
+                response.raise_for_status()
+                result = response.json()
+                
+                message = result["choices"][0]["message"]
+                
+                return {
+                    "content": message.get("content", ""),
+                    "tool_calls": message.get("tool_calls", [])
+                }
             
         except httpx.HTTPError as e:
             logger.error(f"OpenAI provider error: {e}")
             raise
     
     async def close(self):
-        await self.client.aclose()
+        pass  # client 在 async with 中自動關閉
 
 
 class AnthropicProvider(BaseProvider):
@@ -272,14 +281,7 @@ class AnthropicProvider(BaseProvider):
     def __init__(self, config):
         super().__init__(config)
         self.api_key = config.api_key or os.environ.get("ANTHROPIC_API_KEY", "")
-        self.client = httpx.AsyncClient(
-            base_url="https://api.anthropic.com",
-            timeout=120.0,
-            headers={
-                "x-api-key": self.api_key,
-                "anthropic-version": "2023-06-01"
-            }
-        )
+        # 注意：不再在 __init__ 中創建 client，而是在每次調用時創建
     
     async def chat(self, messages: List[Dict[str, str]], **kwargs) -> str:
         # 轉換 messages 格式
@@ -301,14 +303,22 @@ class AnthropicProvider(BaseProvider):
         }
         
         try:
-            response = await self.client.post(
-                "/v1/messages",
-                json=payload
-            )
-            response.raise_for_status()
-            result = response.json()
-            
-            return result["content"][0]["text"]
+            async with httpx.AsyncClient(
+                base_url="https://api.anthropic.com",
+                timeout=120.0,
+                headers={
+                    "x-api-key": self.api_key,
+                    "anthropic-version": "2023-06-01"
+                }
+            ) as client:
+                response = await client.post(
+                    "/v1/messages",
+                    json=payload
+                )
+                response.raise_for_status()
+                result = response.json()
+                
+                return result["content"][0]["text"]
             
         except httpx.HTTPError as e:
             logger.error(f"Anthropic provider error: {e}")
@@ -323,75 +333,7 @@ class AnthropicProvider(BaseProvider):
         }
     
     async def close(self):
-        await self.client.aclose()
-
-
-class DeepSeekProvider(BaseProvider):
-    """DeepSeek Provider"""
-    
-    def __init__(self, config):
-        super().__init__(config)
-        self.api_key = config.api_key or os.environ.get("DEEPSEEK_API_KEY", "")
-        self.client = httpx.AsyncClient(
-            base_url="https://api.deepseek.com",
-            timeout=120.0,
-            headers={"Authorization": f"Bearer {self.api_key}"}
-        )
-    
-    async def chat(self, messages: List[Dict[str, str]], **kwargs) -> str:
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "temperature": kwargs.get("temperature", self.temperature),
-            "max_tokens": kwargs.get("max_tokens", self.max_tokens)
-        }
-        
-        try:
-            response = await self.client.post(
-                "/v1/chat/completions",
-                json=payload
-            )
-            response.raise_for_status()
-            result = response.json()
-            
-            return result["choices"][0]["message"]["content"]
-            
-        except httpx.HTTPError as e:
-            logger.error(f"DeepSeek provider error: {e}")
-            raise
-    
-    async def chat_with_tools(self, messages: List[Dict[str, str]], tools: List[Dict], **kwargs) -> Dict:
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "temperature": kwargs.get("temperature", self.temperature),
-            "max_tokens": kwargs.get("max_tokens", self.max_tokens),
-            "tools": tools if tools else None
-        }
-        
-        payload = {k: v for k, v in payload.items() if v is not None}
-        
-        try:
-            response = await self.client.post(
-                "/v1/chat/completions",
-                json=payload
-            )
-            response.raise_for_status()
-            result = response.json()
-            
-            message = result["choices"][0]["message"]
-            
-            return {
-                "content": message.get("content", ""),
-                "tool_calls": message.get("tool_calls", [])
-            }
-            
-        except httpx.HTTPError as e:
-            logger.error(f"DeepSeek provider error: {e}")
-            raise
-    
-    async def close(self):
-        await self.client.aclose()
+        pass  # client 在 async with 中自動關閉
 
 
 class ProviderFactory:
@@ -402,7 +344,6 @@ class ProviderFactory:
         "openrouter": OpenRouterProvider,
         "openai": OpenAIProvider,
         "anthropic": AnthropicProvider,
-        "deepseek": DeepSeekProvider,
     }
     
     @classmethod

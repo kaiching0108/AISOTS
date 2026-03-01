@@ -76,7 +76,6 @@ pip install -r requirements.txt
 - [OpenRouter](https://openrouter.ai) (推薦)
 - [OpenAI](https://platform.openai.com)
 - [Anthropic](https://console.anthropic.com)
-- [DeepSeek](https://platform.deepseek.com)
 - **Ollama** (本地端，支援多種開源模型)
 
 #### Ollama 本地端設定
@@ -830,7 +829,11 @@ python main.py
 #### 查看日誌
 
 ```bash
-tail -f workspace/logs/trading.log
+# 查看系統日誌
+tail -f workspace/logs/system.log
+
+# 查看交易日誌（JSON 格式）
+cat workspace/logs/trade/trade_logs_$(date +%Y%m%d).json
 ```
 
 #### 重置資料
@@ -938,11 +941,17 @@ python main.py --simulate
   可用代碼：TXF(臺股期貨), MXF(小型臺指), TMF(微型臺指)
   ```
 
-### Q5:停損止盈是如何觸發？
+### Q5: 停損止盈是如何觸發？
 
-系統每60秒檢查一次部位價格：
+系統每次價格更新時檢查部位：
+- **價格來源**：從 `strategy_runner` 獲取最新市場價格，確保與策略決策使用相同價格來源
 - 虧損 >= 停損點數 → 自動平倉
 - 獲利 >= 止盈點數 → 自動平倉
+- 檢查頻率：模擬模式 1分鐘，實盤模式依市場報價
+
+**模擬模式說明**：
+- 使用趨勢模擬演算法生成連續價格
+- 確保停損觸發符合邏輯，不會因價格跳躍而誤觸
 
 ### Q6:斷線時會怎麼樣？
 
