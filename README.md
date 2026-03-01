@@ -23,13 +23,7 @@ cd AISOTS
 pip install -r requirements.txt
 ```
 
-## Telegram for Notify 
-- Create a bot
-  - Open Telegram, search @BotFather
-  - Send /newbot, follow prompts
-  - Copy the token
-
-## Config設定 
+## Config設定 (可透過web界面設定)
 
 編輯 `config.yaml`：
 
@@ -98,11 +92,15 @@ python main.py --simulate
 - Stage 1：LLM 自我審查（檢查程式碼是否符合策略描述）
 - Stage 2：歷史回測（檢查訊號分佈是否合理）
 
-驗證通過後，策略建立成功。
+驗證通過後，策略建立成功。若 Stage 1 失敗，系統會顯示詳細錯誤日誌鏈接，用戶需重新設計策略。
 
-### Telegram 通知
+### Telegram 通知 (Option)
 
-Telegram 機器人 **僅用於接收通知**。
+#### Create Telegram bot 
+- Create a bot
+  - Open Telegram, search @BotFather
+  - Send /newbot, follow prompts
+  - Copy the token
 
 通知類型：
 - 系統啟動/停止

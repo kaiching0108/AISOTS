@@ -4,17 +4,42 @@ from flask import Blueprint, jsonify, request, current_app
 bp = Blueprint('strategies', __name__, url_prefix='/api/strategies')
 
 
-def get_strategy_data(trading_tools):
-    """取得策略資料（JSON格式）"""
+def get_strategy_data(trading_tools, period='all'):
+    """取得策略資料（JSON格式）
+    
+    Args:
+        trading_tools: TradingTools 實例
+        period: 績效查詢週期 (today/week/month/quarter/year/all)
+    """
     strategies = trading_tools.strategy_mgr.get_all_strategies()
     strategies.sort(key=lambda s: s.id)
     
     # 一次性取得所有位置，避免重複查詢
     all_positions = {p.strategy_id: p for p in trading_tools.position_mgr.get_all_positions()}
     
+    # 取得 PerformanceAnalyzer
+    analyzer = trading_tools._get_performance_analyzer()
+    
     result = []
     for s in strategies:
         position = all_positions.get(s.id)
+        
+        # 取得績效數據
+        performance = None
+        try:
+            if analyzer:
+                analysis = analyzer.analyze(s.id, period=period)
+                stats = analysis.get('signal_stats', {})
+                if stats.get('filled_signals', 0) > 0:
+                    performance = {
+                        "total_trades": stats.get('filled_signals', 0),
+                        "win_rate": round(stats.get('win_rate', 0), 1),
+                        "profit_factor": stats.get('profit_factor', 0),
+                        "total_pnl": stats.get('total_pnl', 0),
+                        "avg_pnl": round(stats.get('avg_pnl', 0), 0)
+                    }
+        except Exception:
+            pass
         
         result.append({
             "id": s.id,
@@ -41,7 +66,8 @@ def get_strategy_data(trading_tools):
                 "entry_price": position.entry_price,
                 "current_price": position.current_price,
                 "pnl": position.pnl
-            } if position and position.quantity > 0 else None
+            } if position and position.quantity > 0 else None,
+            "performance": performance
         })
     
     return result
@@ -49,15 +75,21 @@ def get_strategy_data(trading_tools):
 
 @bp.route('', methods=['GET'])
 def get_strategies():
-    """取得所有策略"""
+    """取得所有策略
+    
+    Query Parameters:
+        period: 績效查詢週期 (today/week/month/quarter/year/all)，預設 all
+    """
     try:
         tools = current_app.trading_tools
-        strategies = get_strategy_data(tools)
+        period = request.args.get('period', 'all')
+        strategies = get_strategy_data(tools, period=period)
         
         return jsonify({
             "success": True,
             "data": strategies,
-            "count": len(strategies)
+            "count": len(strategies),
+            "period": period
         })
     except Exception as e:
         return jsonify({

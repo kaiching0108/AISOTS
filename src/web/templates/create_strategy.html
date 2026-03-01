@@ -289,12 +289,17 @@
         <div class="form-row">
             <div class="form-group" style="flex: 0 0 200px;">
                 <label>期貨代碼 <span class="required">*</span></label>
-                <select id="symbol" required>
+                <select id="symbol" required onchange="updateDefaultName()">
                     <option value="">選擇...</option>
                     <option value="TXF">TXF (大台)</option>
                     <option value="MXF">MXF (小台)</option>
                     <option value="TMF">TMF (微台)</option>
                 </select>
+            </div>
+            
+            <div class="form-group" style="flex: 0 0 250px;">
+                <label>策略名稱 <span style="color: #666; font-size: 12px;">(可修改)</span></label>
+                <input type="text" id="name" placeholder="策略名稱" style="width: 100%;">
             </div>
             
             <div class="form-group" style="flex: 0 0 150px;">
@@ -353,7 +358,10 @@
         
         <div class="button-group">
             <button class="btn btn-primary" id="generateBtn" onclick="generatePreview()">
-                ✨ Generate - 让 LLM 填充参数
+                ✨ Generate - 讓 LLM 設計策略
+            </button>
+            <button class="btn btn-success" id="directGenerateBtn" onclick="directGenerate()">
+                🚀 直接由 LLM 產生策略代碼
             </button>
         </div>
     </div>
@@ -363,13 +371,6 @@
         <div class="panel-title">🤖 LLM 建议 / 確認</div>
         
         <div class="form-row">
-            <div class="form-group" style="flex: 1;">
-                <label>策略名稱 <span style="color: #666; font-size: 12px;">(可修改)</span></label>
-                <input type="text" id="previewName" placeholder="策略名稱" style="width: 100%;">
-            </div>
-        </div>
-        
-        <div class="form-row">
             <div class="form-group" style="flex: 0 0 200px;">
                 <label>期貨代碼</label>
                 <select id="previewSymbol">
@@ -377,6 +378,11 @@
                     <option value="MXF">MXF (小台)</option>
                     <option value="TMF">TMF (微台)</option>
                 </select>
+            </div>
+            
+            <div class="form-group" style="flex: 0 0 250px;">
+                <label>策略名稱 <span style="color: #666; font-size: 12px;">(可修改)</span></label>
+                <input type="text" id="previewName" placeholder="策略名稱" style="width: 100%;">
             </div>
             
             <div class="form-group" style="flex: 0 0 150px;">
@@ -449,6 +455,16 @@
 
 {% block extra_js %}
 <script>
+function updateDefaultName() {
+    const symbol = document.getElementById('symbol').value;
+    const nameInput = document.getElementById('name');
+    
+    // 只有當名稱欄位為空時，才自動填入預設值
+    if (symbol && !nameInput.value) {
+        nameInput.value = '策略_' + symbol;
+    }
+}
+
 function showInputPanel() {
     document.getElementById('inputPanel').classList.remove('hidden');
     document.getElementById('previewPanel').classList.add('hidden');
@@ -525,7 +541,49 @@ async function generatePreview() {
         alert('請求失敗: ' + error.message);
     } finally {
         btn.disabled = false;
-        btn.textContent = '✨ Generate - 让 LLM 填充参数';
+        btn.textContent = '✨ Generate - 讓 LLM 設計策略';
+    }
+}
+
+async function directGenerate() {
+    // 1. 檢查必填欄位
+    const symbol = document.getElementById('symbol').value;
+    const prompt = document.getElementById('prompt').value;
+    const name = document.getElementById('name').value || ('策略_' + symbol);
+    
+    if (!symbol) {
+        alert('請選擇期貨代碼');
+        return;
+    }
+    if (!prompt) {
+        alert('請輸入策略提示詞');
+        return;
+    }
+    
+    const btn = document.getElementById('directGenerateBtn');
+    btn.disabled = true;
+    btn.textContent = '處理中...';
+    
+    try {
+        // 2. 直接使用使用者的原始輸入填充 previewPanel 欄位
+        // 這樣就能保留使用者的原始 prompt，不經過 LLM 修改
+        document.getElementById('previewSymbol').value = symbol;
+        document.getElementById('previewName').value = name;
+        document.getElementById('previewTimeframe').value = document.getElementById('timeframe').value;
+        document.getElementById('previewQuantity').value = document.getElementById('quantity').value || 1;
+        document.getElementById('previewStopLoss').value = document.getElementById('stopLoss').value || '';
+        document.getElementById('previewTakeProfit').value = document.getElementById('takeProfit').value || '';
+        // 直接使用使用者的原始 prompt，不經過 LLM 生成/修改
+        document.getElementById('previewPrompt').value = prompt;
+        document.getElementById('previewDirection').value = document.getElementById('direction').value;
+        
+        // 3. 直接呼叫 confirmStrategy 進入產生流程
+        await confirmStrategy();
+    } catch (error) {
+        alert('請求失敗: ' + error.message);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '🚀 直接由 LLM 產生策略代碼';
     }
 }
 
@@ -639,6 +697,13 @@ function updateProgressUI(step, message, percent) {
 }
 
 function displayResult(data) {
+    // 調試：打印接收到的數據
+    console.log('Display result data:', data);
+    if (data.data && data.data.verification) {
+        console.log('Verification data:', data.data.verification);
+        console.log('Stage 1 log file:', data.data.verification.stage1_log_file);
+    }
+    
     const btn = document.getElementById('confirmBtn');
     btn.disabled = false;
     btn.textContent = '✅ 確認并生成策略代码';
@@ -683,6 +748,14 @@ function displayResult(data) {
                     html += '<div>' + (data.data.verification.stage2_error || '回测失敗') + '</div>';
                 }
                 html += '</div>';
+            } else {
+                // Stage 1 失敗，顯示日誌檔案鏈接
+                if (data.data.verification.stage1_log_file) {
+                    html += '<div style="margin-top: 12px; padding: 12px; background: #fff3cd; border-radius: 6px; border-left: 4px solid #f39c12;">';
+                    html += '<div style="font-size: 13px; color: #856404; margin-bottom: 8px;">📄 查看詳細失敗原因：</div>';
+                    html += '<a href="' + data.data.verification.stage1_log_file + '" target="_blank" style="font-size: 13px; color: #007bff; text-decoration: underline;">開啟 Stage 1 Review 日誌</a>';
+                    html += '</div>';
+                }
             }
         }
         
@@ -704,6 +777,14 @@ function displayResult(data) {
                 html += '<div class="stage-status failed">Stage 1: LLM Review - 失敗</div>';
                 html += '<div>' + (data.data.verification.stage1_error || '驗證失敗') + '</div>';
                 html += '</div>';
+                
+                // Stage 1 失敗，顯示日誌檔案鏈接
+                if (data.data.verification.stage1_log_file) {
+                    html += '<div style="margin-top: 12px; padding: 12px; background: #fff3cd; border-radius: 6px; border-left: 4px solid #f39c12;">';
+                    html += '<div style="font-size: 13px; color: #856404; margin-bottom: 8px;">📄 查看詳細失敗原因：</div>';
+                    html += '<a href="' + data.data.verification.stage1_log_file + '" target="_blank" style="font-size: 13px; color: #007bff; text-decoration: underline;">開啟 Stage 1 Review 日誌</a>';
+                    html += '</div>';
+                }
             }
             
             if (data.data.verification.stage1_passed && data.data.verification.stage2_passed === false) {

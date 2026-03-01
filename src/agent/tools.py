@@ -61,6 +61,9 @@ class TradingTools:
         self._signal_recorder = None
         self._performance_analyzer = None
         
+        # 保存最後一次驗證錯誤資訊（供 Web API 使用）
+        self._last_verification_error: Optional[Dict[str, Any]] = None
+        
         # 交易日誌儲存
         from src.storage.trade_log_store import TradeLogStore
         self.trade_log_store = TradeLogStore()
@@ -406,6 +409,24 @@ ID: {strategy_id}
                                 f"訂單: {order.order_id}\n"
                                 f"平倉價: {filled_price}\n"
                                 f"損益: {pnl:+,.0f}"
+                            )
+                            
+                            # 記錄交易日誌 (for Web UI)
+                            self.trade_log_store.add_log(
+                                event_type="CLOSE_POSITION",
+                                strategy_id=old_strategy_id,
+                                strategy_name=f"強制平倉-{old_strategy_id}",
+                                symbol=position.symbol,
+                                message=f"📤 強制平倉 {position.symbol} {position.direction} {position.quantity}口 @ {filled_price} | 損益: {pnl:+,.0f}",
+                                details={
+                                    "exit_price": filled_price,
+                                    "quantity": position.quantity,
+                                    "pnl": pnl,
+                                    "reason": f"強制平倉 - 啟用新策略 {strategy_id}",
+                                    "entry_price": position.entry_price,
+                                    "direction": position.direction,
+                                    "order_id": order.order_id
+                                }
                             )
                         else:
                             close_error = "部位更新失敗"
@@ -1039,10 +1060,18 @@ K線週期: {params['timeframe']}
         
         if not verify_result["passed"]:
             error_msg = verify_result.get('error', '未知錯誤')
+            stage1_log_file = verify_result.get('stage1_log_file')
             logger.warning(f"Strategy verification failed: {error_msg}")
             self.strategy_mgr.delete_strategy(strategy_id)
             self._clear_pending()
-            return f"""❌ 驗證失敗（3 次嘗試）
+            
+            # 保存日誌檔案路徑供 Web API 使用
+            self._last_verification_error = {
+                'error': error_msg,
+                'stage1_log_file': stage1_log_file
+            }
+            
+            return f"""❌ 驗證失敗
 {'='*30}
 原因：{error_msg}
 
@@ -1374,12 +1403,13 @@ K線週期: {data['timeframe']}
             strategy.set_strategy_code(code, class_name)
             
             timeframe = strategy.params.get("timeframe", "15m")
+            direction = getattr(strategy, 'direction', 'long')
             verify_result = await llm_generator.verify_strategy(
                 prompt=strategy.prompt,
                 code=code,
                 symbol=strategy.symbol,
                 timeframe=timeframe,
-                max_attempts=3
+                direction=direction
             )
             
             if verify_result["passed"]:
@@ -1390,10 +1420,11 @@ K線週期: {data['timeframe']}
             else:
                 error = verify_result["error"]
                 attempts = verify_result.get("attempts", 3)
+                stage1_log_file = verify_result.get("stage1_log_file")
                 strategy.set_verification_failed(error)
                 logger.warning(f"Strategy {strategy.id} verification failed: {error}")
                 _notify_progress(f"⚠️ 驗證失敗 ({attempts}/3)：{error}")
-                return {"passed": False, "error": error}
+                return {"passed": False, "error": error, "stage1_log_file": stage1_log_file}
                 
         except Exception as e:
             error_msg = f"驗證過程發生錯誤: {str(e)}"

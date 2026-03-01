@@ -105,18 +105,41 @@ class PerformanceAnalyzer:
                 "win_count": 0,
                 "lose_count": 0,
                 "win_rate": 0.0,
+                "profit_factor": 0.0,
                 "stop_loss_count": 0,
                 "take_profit_count": 0,
                 "signal_reversal_count": 0,
                 "total_pnl": 0.0,
                 "avg_pnl": 0.0,
+                "avg_profit": 0.0,
+                "avg_loss": 0.0,
                 "best_trade": 0.0,
-                "worst_trade": 0.0
+                "worst_trade": 0.0,
+                "max_drawdown": 0.0,
+                "equity_curve": [],
+                "trade_distribution": []
             }
         
-        pnl_values = [s.get("pnl", 0) for s in signals if s.get("pnl") is not None]
+        sorted_signals = sorted(signals, key=lambda x: x.get("filled_at", x.get("timestamp", "")))
+        
+        pnl_values = [s.get("pnl", 0) for s in sorted_signals if s.get("pnl") is not None]
         wins = [p for p in pnl_values if p > 0]
         losses = [p for p in pnl_values if p < 0]
+        
+        total_wins = sum(wins) if wins else 0
+        total_losses = abs(sum(losses)) if losses else 0
+        profit_factor = total_wins / total_losses if total_losses > 0 else (float('inf') if total_wins > 0 else 0.0)
+        
+        equity_curve = []
+        cumulative = 0
+        for sig in sorted_signals:
+            if sig.get("pnl") is not None:
+                cumulative += sig.get("pnl", 0)
+                date_str = (sig.get("filled_at") or sig.get("timestamp"))[:10]
+                equity_curve.append({
+                    "date": date_str,
+                    "pnl": round(cumulative, 2)
+                })
         
         stop_loss_count = len([s for s in signals if s.get("exit_reason") == "stop_loss"])
         take_profit_count = len([s for s in signals if s.get("exit_reason") == "take_profit"])
@@ -128,6 +151,7 @@ class PerformanceAnalyzer:
             "win_count": len(wins),
             "lose_count": len(losses),
             "win_rate": len(wins) / len(pnl_values) * 100 if pnl_values else 0.0,
+            "profit_factor": round(profit_factor, 2) if profit_factor != float('inf') else 0.0,
             "stop_loss_count": stop_loss_count,
             "take_profit_count": take_profit_count,
             "signal_reversal_count": signal_reversal_count,
@@ -137,7 +161,9 @@ class PerformanceAnalyzer:
             "avg_loss": abs(sum(losses) / len(losses)) if losses else 0.0,
             "best_trade": max(pnl_values) if pnl_values else 0.0,
             "worst_trade": min(pnl_values) if pnl_values else 0.0,
-            "max_drawdown": self._calculate_max_drawdown(pnl_values)
+            "max_drawdown": self._calculate_max_drawdown(pnl_values),
+            "equity_curve": equity_curve,
+            "trade_distribution": [round(p, 2) for p in pnl_values]
         }
     
     def _calculate_max_drawdown(self, pnl_values: list) -> float:

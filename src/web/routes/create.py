@@ -243,9 +243,14 @@ def confirm_strategy():
         prompt = data.get('prompt', '')
         direction = data.get('direction', 'long')
         timeframe = data.get('timeframe', '15m')
-        stop_loss = int(data.get('stop_loss', 0)) or 30
-        take_profit = int(data.get('take_profit', 0)) or 50
-        quantity = int(data.get('quantity', 1))
+        stop_loss = int(data.get('stop_loss')) if data.get('stop_loss') is not None else 0
+        take_profit = int(data.get('take_profit')) if data.get('take_profit') is not None else 0
+        quantity = int(data.get('quantity')) if data.get('quantity') is not None else 1
+        if quantity < 1:
+            return jsonify({
+                "success": False,
+                "message": "口數必須至少為 1"
+            }), 400
         # 接受用户自定义的策略名称，若未提供则使用默认值
         strategy_name = data.get('name') or f"策略_{symbol}"
         
@@ -361,6 +366,29 @@ def confirm_strategy():
             "stage2_passed": stage2_passed,
             "stage2_error": stage2_error,
         }
+        
+        # Stage 1 失敗時，獲取日誌檔案路徑
+        if not stage1_passed:
+            logger.info(f"Stage 1 failed detected, checking for log file...")
+            last_error = getattr(trading_tools, '_last_verification_error', None)
+            logger.info(f"Last error value: {last_error}")
+            if last_error and 'stage1_log_file' in last_error:
+                log_file_path = last_error['stage1_log_file']
+                logger.info(f"Log file path from error: {log_file_path}")
+                if log_file_path:
+                    # 轉換為可訪問的 URL 路徑
+                    log_file_str = str(log_file_path).replace("\\", "/")
+                    if "workspace/" in log_file_str:
+                        log_file_str = log_file_str.split("workspace/")[-1]
+                        log_file_str = f"/workspace/{log_file_str}"
+                    elif not log_file_str.startswith("workspace/") and not log_file_str.startswith("/workspace/"):
+                        log_file_str = f"/workspace/{log_file_str}"
+                    verification_result["stage1_log_file"] = log_file_str
+                    logger.info(f"Added stage1_log_file to response: {log_file_str}")
+                else:
+                    logger.warning(f"stage1_log_file is None in last_error")
+            else:
+                logger.warning(f"No stage1_log_file in last_error: {last_error}")
         
         # 如果验证通过，尝试获取回测结果
         chart_path = None

@@ -2,7 +2,129 @@
 
 {% block title %}策略管理 - AISOTS{% endblock %}
 
+{% block extra_css %}
+<style>
+    .perf-bar {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        margin-bottom: 15px;
+    }
+    .perf-bar select {
+        padding: 6px 10px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-size: 14px;
+    }
+    .strategy-card {
+        display: flex;
+        flex-wrap: wrap;
+        border: 1px solid #eee;
+        border-radius: 5px;
+        margin-bottom: 8px;
+        overflow: hidden;
+    }
+    .strategy-card.enabled {
+        border-left: 4px solid #27ae60;
+    }
+    .strategy-card.disabled {
+        border-left: 4px solid #95a5a6;
+    }
+    .card-left {
+        flex: 0 0 65%;
+        padding: 10px 12px;
+        background: #fff;
+    }
+    .card-right {
+        flex: 0 0 35%;
+        padding: 10px 12px;
+        background: #f8f9fa;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+    }
+    .card-header-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-bottom: 4px;
+    }
+    .card-info-row {
+        font-size: 12px;
+        color: #666;
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+    .card-info-row span {
+        white-space: nowrap;
+    }
+    .perf-period {
+        font-size: 11px;
+        color: #666;
+        margin-bottom: 4px;
+    }
+    .perf-values {
+        display: flex;
+        gap: 20px;
+    }
+    .perf-item {
+        text-align: center;
+    }
+    .perf-item .value {
+        font-size: 26px;
+        font-weight: bold;
+        line-height: 1.1;
+    }
+    .perf-item .label {
+        font-size: 10px;
+        color: #666;
+    }
+    .perf-green { color: #27ae60; }
+    .perf-yellow { color: #f39c12; }
+    .perf-red { color: #e74c3c; }
+    .card-actions {
+        flex: 0 0 100%;
+        padding: 8px 12px;
+        background: #fafafa;
+        border-top: 1px solid #eee;
+        display: flex;
+        gap: 5px;
+        flex-wrap: wrap;
+    }
+    .card-actions .btn {
+        padding: 5px 10px;
+        font-size: 12px;
+    }
+    .badge {
+        padding: 2px 6px;
+        border-radius: 3px;
+        font-size: 11px;
+        font-weight: bold;
+    }
+    .badge-success { background: #d4edda; color: #155724; }
+    .badge-danger { background: #f8d7da; color: #721c24; }
+</style>
+{% endblock %}
+
 {% block content %}
+<!-- 績效週期選擇器 -->
+<div class="card">
+    <div class="perf-bar">
+        <span>📊 績效週期：</span>
+        <select id="periodSelect" onchange="loadStrategies()">
+            <option value="today">今日</option>
+            <option value="week">本週</option>
+            <option value="month" selected>本月</option>
+            <option value="quarter">本季</option>
+            <option value="year">本年</option>
+            <option value="all">全部</option>
+        </select>
+    </div>
+</div>
+
 <!-- 已啟用的策略區域 -->
 <div class="card" style="border-left: 4px solid #27ae60;">
     <div class="card-header" style="background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%); color: white;">
@@ -26,46 +148,115 @@
 
 {% block extra_js %}
 <script>
+    // 根據數值取得顏色class
+    function getPerfColor(value, type) {
+        if (type === 'win_rate') {
+            if (value >= 50) return 'perf-green';
+            if (value >= 40) return 'perf-yellow';
+            return 'perf-red';
+        } else if (type === 'profit_factor') {
+            if (value >= 1.5) return 'perf-green';
+            if (value >= 1.0) return 'perf-yellow';
+            return 'perf-red';
+        }
+        return '';
+    }
+    
     // 策略卡片 HTML 生成函數
     function generateStrategyCard(s) {
-        return `
-            <div class="strategy-item">
-                <div class="strategy-header">
-                    <div>
-                        <span class="badge ${s.enabled ? 'badge-success' : 'badge-danger'}">
-                            ${s.enabled ? '✅ 啟用' : '❌ 停用'}
-                        </span>
-                        <span class="strategy-name">${s.name}</span>
-                        <span style="color: #666; margin-left: 10px;">${s.id}</span>
+        // 績效數據
+        const perf = s.performance;
+        const hasPerf = perf && perf.total_trades > 0;
+        
+        const periodText = {
+            'today': '今日',
+            'week': '本週',
+            'month': '本月',
+            'quarter': '本季',
+            'year': '本年',
+            'all': '全部'
+        };
+        const currentPeriod = document.getElementById('periodSelect')?.value || 'month';
+        
+        // 左側 - Header 資訊
+        const headerHtml = `
+            <div class="card-header-row">
+                <span class="badge ${s.enabled ? 'badge-success' : 'badge-danger'}">
+                    ${s.enabled ? '✅ 啟用' : '❌ 停用'}
+                </span>
+                <strong>${s.name}</strong>
+                <span style="color: #666;">${s.id}</span>
+            </div>
+            <div class="card-info-row">
+                <span>${s.symbol}</span>
+                <span>|</span>
+                <span>v${s.version}</span>
+                <span>|</span>
+                <span>${s.timeframe || '-'}</span>
+                <span>|</span>
+                <span>${s.direction === 'short' ? '做空' : '做多'}</span>
+                <span>|</span>
+                <span>口數:${s.quantity || '-'}</span>
+                <span>|</span>
+                <span>SL:${s.stop_loss || '-'}</span>
+                <span>TP:${s.take_profit || '-'}</span>
+            </div>
+            <div class="card-info-row">
+                <span>建立: ${s.created_at || '-'}</span>
+                ${s.goal ? `<span>|</span><span>目標: ${s.goal}/${s.goal_unit === 'daily' ? '日' : s.goal_unit}</span>` : ''}
+            </div>
+        `;
+        
+        // 右側 - 績效資訊
+        let perfHtml = '';
+        if (hasPerf) {
+            const winRateClass = getPerfColor(perf.win_rate, 'win_rate');
+            const pfClass = getPerfColor(perf.profit_factor, 'profit_factor');
+            
+            perfHtml = `
+                <div class="perf-period">📊 ${periodText[currentPeriod] || '本月'} ${perf.total_trades}筆</div>
+                <div class="perf-values">
+                    <div class="perf-item">
+                        <div class="value ${winRateClass}">${perf.win_rate}%</div>
+                        <div class="label">勝率</div>
+                    </div>
+                    <div class="perf-item">
+                        <div class="value ${pfClass}">${perf.profit_factor > 0 ? perf.profit_factor.toFixed(2) : '-'}</div>
+                        <div class="label">盈虧比</div>
                     </div>
                 </div>
-                <div class="strategy-info">
-                    <div>期貨: ${s.symbol}</div>
-                    <div>版本: v${s.version}</div>
-                    <div>週期: ${s.timeframe || '-'}</div>
-                    <div>口數: ${s.quantity || '-'}</div>
-                    <div>方向: ${s.direction === 'short' ? '做空' : '做多'}</div>
-                    <div>停損: ${s.stop_loss || '-'} 點</div>
-                    <div>停利: ${s.take_profit || '-'} 點</div>
-                    <div>創建: ${s.created_at || '-'}</div>
-                    <div>目標: ${s.goal ? s.goal + '/' + (s.goal_unit === 'daily' ? '日' : s.goal_unit === 'weekly' ? '週' : s.goal_unit === 'monthly' ? '月' : s.goal_unit) : '未設定'}</div>
-                    ${s.goal ? `<div style="color: #27ae60; font-size: 12px;">自動 Review: 每 ${s.review_period} ${s.review_unit === 'day' ? '天' : s.review_unit === 'week' ? '週' : s.review_unit === 'month' ? '月' : s.review_unit}</div>` : '<div style="color: #999; font-size: 12px;">設定目標後可啟用自動 Review</div>'}
+            `;
+        } else {
+            perfHtml = `
+                <div class="perf-period" style="color: #999;">尚無交易紀錄</div>
+            `;
+        }
+        
+        // 部位警告
+        const positionHtml = s.position ? `
+            <div style="padding: 8px 12px; background: #fff3cd; font-size: 12px;">
+                ⚠️ 部位: ${s.position.direction} ${s.position.quantity}口 @ ${s.position.entry_price} (${s.position.pnl >= 0 ? '+' : ''}${s.position.pnl})
+            </div>
+        ` : '';
+        
+        return `
+            <div class="strategy-card ${s.enabled ? 'enabled' : 'disabled'}">
+                <div class="card-left">
+                    ${headerHtml}
                 </div>
-                ${s.position ? `
-                <div style="margin-top: 10px; padding: 10px; background: #fff3cd; border-radius: 5px; font-size: 13px;">
-                    <strong>⚠️ 仍有部位</strong>: ${s.position.direction} ${s.position.quantity}口 @ ${s.position.entry_price}
-                    (${s.position.pnl >= 0 ? '+' : ''}${s.position.pnl})
+                <div class="card-right">
+                    ${perfHtml}
                 </div>
-                ` : ''}
-                <div class="strategy-actions">
+                ${positionHtml}
+                <div class="card-actions">
                     <button class="btn btn-primary btn-sm" onclick="editGoal('${s.id}', ${s.goal !== null && s.goal !== undefined ? s.goal : 'null'}, '${s.goal_unit || 'daily'}', ${s.review_period !== null && s.review_period !== undefined ? s.review_period : 5}, '${s.review_unit || 'day'}')">🎯 目標</button>
                     ${s.enabled ? 
-                        `<button class="btn btn-warning btn-sm" onclick="disableStrategy('${s.id}', ${s.has_position})">停用</button>` :
-                        `<button class="btn btn-success btn-sm" onclick="enableStrategy('${s.id}')">啟用</button>`
+                        `<button class="btn btn-warning btn-sm" onclick="disableStrategy('${s.id}', ${s.has_position})">⏹ 停用</button>` :
+                        `<button class="btn btn-success btn-sm" onclick="enableStrategy('${s.id}')">▶ 啟用</button>`
                     }
-                    <button class="btn btn-primary btn-sm" onclick="runBacktest('${s.id}', '${s.name}')">回測</button>
+                    <button class="btn btn-primary btn-sm" onclick="runBacktest('${s.id}', '${s.name}')">📈 回測</button>
                     <button class="btn btn-info btn-sm" onclick="viewCode('${s.id}')">📄</button>
-                    <button class="btn btn-danger btn-sm" onclick="deleteStrategy('${s.id}', ${s.has_position})">刪除</button>
+                    <button class="btn btn-danger btn-sm" onclick="deleteStrategy('${s.id}', ${s.has_position})">🗑 刪除</button>
                 </div>
             </div>
         `;
@@ -74,7 +265,8 @@
     async function loadStrategies() {
         try {
             console.log('Loading strategies...');
-            const response = await fetch('/api/strategies');
+            const period = document.getElementById('periodSelect')?.value || 'month';
+            const response = await fetch(`/api/strategies?period=${period}`);
             console.log('Response status:', response.status);
             
             if (!response.ok) {

@@ -79,6 +79,11 @@ def create_web_app(trading_tools, llm_provider=None):
         """系統配置頁面"""
         return render_template('config.html')
     
+    @app.route('/performance')
+    def performance_page():
+        """績效分析頁面"""
+        return render_template('performance.html')
+    
     logger.info("Flask Web 應用已建立")
     
     return app

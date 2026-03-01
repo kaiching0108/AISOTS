@@ -402,20 +402,30 @@ class LLMGenerator:
         """清除快取"""
         self._cache.clear()
     
-    async def review_code(self, prompt: str, code: str) -> dict:
+    async def review_code(self, prompt: str, code: str, direction: str = "long") -> dict:
         """Stage 1: LLM 自我審查
         
         Args:
             prompt: 用戶策略描述
             code: LLM 生成的程式碼
+            direction: 交易方向 (long=做多, short=做空, both=多空都做)
             
         Returns:
             dict: {'passed': bool, 'reason': str, 'suggestion': str}
         """
+        direction_text = {
+            "long": "做多 (Long) - 只會产生买入信号，不會产生卖出信号",
+            "short": "做空 (Short) - 只會产生卖出信号，不會产生买入信号",
+            "both": "多空都做 (Long/Short) - 可以产生买入和卖出信号"
+        }.get(direction, "做多 (Long)")
+        
         review_prompt = f"""你是一個程式碼審查員。請審查以下策略程式碼是否符合用戶的策略描述。
 
 ## 用戶策略描述
 {prompt}
+
+## 交易方向
+{direction_text}
 
 ## LLM 生成的程式碼
 ```python
@@ -425,7 +435,10 @@ class LLMGenerator:
 ## 審查要點
 1. 程式碼邏輯是否正確實現了策略描述？
 2. 訊號判斷條件是否正確？（buy/sell/close/hold）
-3. 是否有明顯的邏輯錯誤或 bug？
+3. 買賣邏輯是否與交易方向一致？
+   - 做多(buy)時：應該在低價買入
+   - 做空(sell)時：應該在高價賣出
+4. 是否有明顯的邏輯錯誤或 bug？
 
 ## 輸出格式
 請用以下格式回覆：
@@ -665,15 +678,19 @@ class LLMGenerator:
             logger.error(f"Error in backtest_strategy: {e}")
             return {"passed": False, "reason": f"回測過程發生錯誤: {str(e)}"}
     
-    async def verify_strategy(self, prompt: str, code: str, symbol: str, timeframe: str = "15m", max_attempts: int = 3) -> dict:
+    async def verify_strategy(self, prompt: str, code: str, symbol: str, timeframe: str = "15m", direction: str = "long") -> dict:
         """兩階段策略驗證流程
+        
+        流程說明：
+        - Stage 1: LLM Review (只執行一次，失敗即返回)
+        - Stage 2: Backtest (Stage 1 通過後才執行)
         
         Args:
             prompt: 用戶策略描述
             code: LLM 生成的程式碼
             symbol: 期貨代碼
             timeframe: K 線週期
-            max_attempts: 最大驗證次數
+            direction: 交易方向 (long/short/both)
             
         Returns:
             dict: {'passed': bool, 'error': str, 'attempts': int}
@@ -690,102 +707,98 @@ class LLMGenerator:
             logger.error(f"Initial compile failed: {error_msg}")
             return {"passed": False, "error": f"程式碼編譯失敗: {error_msg}", "attempts": 1}
         
-        for attempt in range(1, max_attempts + 1):
-            logger.info(f"Verification attempt {attempt}/{max_attempts}")
+        attempt = 1
+        logger.info(f"Starting verification (single attempt), direction={direction}")
+        
+        # Stage 1: LLM Review
+        logger.info(f"Starting Stage 1: LLM Review, direction={direction}")
+        review_result = await self.review_code(prompt, code, direction)
+        
+        # 詳細記錄 Stage 1 結果（不截斷）
+        log_file_path = None  # 初始化變數
+        if review_result["passed"]:
+            logger.info(f"Stage 1 PASSED: {review_result.get('reason', 'N/A')}")
+        else:
+            # Stage 1 失敗 - 詳細記錄所有資訊到控制台
+            logger.warning("=" * 80)
+            logger.warning("STAGE 1 FAILED - DETAILED LOG")
+            logger.warning("=" * 80)
+            logger.warning(f"Strategy: {strategy_class.__name__ if strategy_class else 'Unknown'}")
+            logger.warning(f"Failure Reason: {review_result.get('reason', 'N/A')}")
+            logger.warning(f"Suggestion: {review_result.get('suggestion', 'N/A')}")
+            logger.warning("-" * 80)
+            logger.warning("GENERATED CODE:")
+            logger.warning("-" * 80)
+            logger.warning(code)
+            logger.warning("-" * 80)
+            logger.warning("FULL LLM REVIEW RESPONSE:")
+            logger.warning("-" * 80)
+            logger.warning(review_result.get('full_response', 'N/A'))
+            logger.warning("=" * 80)
             
-            # Stage 1: LLM Review
-            logger.info("Starting Stage 1: LLM Review")
-            review_result = await self.review_code(prompt, code)
-            
-            # 詳細記錄 Stage 1 結果（不截斷）
-            if review_result["passed"]:
-                logger.info(f"Stage 1 PASSED: {review_result.get('reason', 'N/A')}")
-            else:
-                # Stage 1 失敗 - 詳細記錄所有資訊到控制台
-                logger.warning("=" * 80)
-                logger.warning("STAGE 1 FAILED - DETAILED LOG")
-                logger.warning("=" * 80)
-                logger.warning(f"Strategy: {strategy_class.__name__ if strategy_class else 'Unknown'}")
-                logger.warning(f"Failure Reason: {review_result.get('reason', 'N/A')}")
-                logger.warning(f"Suggestion: {review_result.get('suggestion', 'N/A')}")
-                logger.warning("-" * 80)
-                logger.warning("GENERATED CODE:")
-                logger.warning("-" * 80)
-                logger.warning(code)
-                logger.warning("-" * 80)
-                logger.warning("FULL LLM REVIEW RESPONSE:")
-                logger.warning("-" * 80)
-                logger.warning(review_result.get('full_response', 'N/A'))
-                logger.warning("=" * 80)
+            # Stage 1 失敗 - 寫入詳細日誌檔案
+            try:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                strategy_name = strategy_class.__name__ if strategy_class else "Unknown"
+                filename = f"{strategy_name}_{timestamp}_failed.txt"
+                log_file_path = STAGE1_REVIEW_DIR / filename
                 
-                # Stage 1 失敗 - 寫入詳細日誌檔案
-                try:
-                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    strategy_name = strategy_class.__name__ if strategy_class else "Unknown"
-                    filename = f"{strategy_name}_{timestamp}_failed.txt"
-                    log_file_path = STAGE1_REVIEW_DIR / filename
-                    
-                    with open(log_file_path, 'w', encoding='utf-8') as f:
-                        f.write("=" * 80 + "\n")
-                        f.write("STAGE 1 REVIEW FAILED - DETAILED REPORT\n")
-                        f.write("=" * 80 + "\n\n")
-                        f.write(f"Strategy ID: {strategy_name}\n")
-                        f.write(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                        f.write(f"User Prompt: {prompt}\n\n")
-                        f.write("=" * 80 + "\n")
-                        f.write("FAILURE ANALYSIS\n")
-                        f.write("=" * 80 + "\n\n")
-                        f.write(f"Failure Reason:\n{review_result.get('reason', 'N/A')}\n\n")
-                        f.write(f"Suggestion:\n{review_result.get('suggestion', 'N/A')}\n\n")
-                        f.write("=" * 80 + "\n")
-                        f.write("GENERATED CODE\n")
-                        f.write("=" * 80 + "\n\n")
-                        f.write(code)
-                        f.write("\n\n")
-                        f.write("=" * 80 + "\n")
-                        f.write("FULL LLM REVIEW RESPONSE\n")
-                        f.write("=" * 80 + "\n\n")
-                        f.write(review_result.get('full_response', 'N/A'))
-                        f.write("\n")
-                        f.write("=" * 80 + "\n")
-                        f.write("END OF REPORT\n")
-                        f.write("=" * 80 + "\n")
-                    
-                    logger.info(f"Stage 1 detailed review log saved to: {log_file_path}")
-                except Exception as e:
-                    logger.error(f"Failed to write Stage 1 review log file: {e}")
-            
-            if not review_result["passed"]:
-                # 如果 LLM Review 失敗，不嘗試自動修復，直接返回失敗
-                # 讓用戶重新設計策略
-                return {
-                    "passed": False,
-                    "error": f"Stage 1 失敗: {review_result['reason']}",
-                    "attempts": attempt
-                }
-            
-            # Stage 2: Backtest
-            logger.info("Starting Stage 2: Backtest")
-            backtest_result = await self.backtest_strategy(strategy_class, symbol, timeframe)
-            logger.info(f"Stage 2 result: passed={backtest_result['passed']}, reason={backtest_result.get('reason', 'N/A')}, signal_counts={backtest_result.get('signal_counts', {})}")
-            
-            if not backtest_result["passed"]:
-                logger.warning(f"Stage 2 failed: {backtest_result['reason']}")
-                return {
-                    "passed": False,
-                    "error": f"Stage 2 失敗: {backtest_result['reason']}",
-                    "attempts": attempt
-                }
-            
-            logger.info(f"Verification passed on attempt {attempt}")
+                with open(log_file_path, 'w', encoding='utf-8') as f:
+                    f.write("=" * 80 + "\n")
+                    f.write("STAGE 1 REVIEW FAILED - DETAILED REPORT\n")
+                    f.write("=" * 80 + "\n\n")
+                    f.write(f"Strategy ID: {strategy_name}\n")
+                    f.write(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                    f.write(f"User Prompt: {prompt}\n\n")
+                    f.write("=" * 80 + "\n")
+                    f.write("FAILURE ANALYSIS\n")
+                    f.write("=" * 80 + "\n\n")
+                    f.write(f"Failure Reason:\n{review_result.get('reason', 'N/A')}\n\n")
+                    f.write(f"Suggestion:\n{review_result.get('suggestion', 'N/A')}\n\n")
+                    f.write("=" * 80 + "\n")
+                    f.write("GENERATED CODE\n")
+                    f.write("=" * 80 + "\n\n")
+                    f.write(code)
+                    f.write("\n\n")
+                    f.write("=" * 80 + "\n")
+                    f.write("FULL LLM REVIEW RESPONSE\n")
+                    f.write("=" * 80 + "\n\n")
+                    f.write(review_result.get('full_response', 'N/A'))
+                    f.write("\n")
+                    f.write("=" * 80 + "\n")
+                    f.write("END OF REPORT\n")
+                    f.write("=" * 80 + "\n")
+                
+                logger.info(f"Stage 1 detailed review log saved to: {log_file_path}")
+            except Exception as e:
+                logger.error(f"Failed to write Stage 1 review log file: {e}")
+        
+        if not review_result["passed"]:
+            # 如果 LLM Review 失敗，不嘗試自動修復，直接返回失敗
+            # 讓用戶重新設計策略
             return {
-                "passed": True,
-                "error": None,
+                "passed": False,
+                "error": f"Stage 1 失敗: {review_result['reason']}",
+                "attempts": attempt,
+                "stage1_log_file": str(log_file_path) if log_file_path else None
+            }
+        
+        # Stage 2: Backtest
+        logger.info("Starting Stage 2: Backtest")
+        backtest_result = await self.backtest_strategy(strategy_class, symbol, timeframe)
+        logger.info(f"Stage 2 result: passed={backtest_result['passed']}, reason={backtest_result.get('reason', 'N/A')}, signal_counts={backtest_result.get('signal_counts', {})}")
+        
+        if not backtest_result["passed"]:
+            logger.warning(f"Stage 2 failed: {backtest_result['reason']}")
+            return {
+                "passed": False,
+                "error": f"Stage 2 失敗: {backtest_result['reason']}",
                 "attempts": attempt
             }
         
+        logger.info(f"Verification passed")
         return {
-            "passed": False,
-            "error": f"驗證失敗，已嘗試 {max_attempts} 次",
-            "attempts": max_attempts
+            "passed": True,
+            "error": None,
+            "attempts": attempt
         }

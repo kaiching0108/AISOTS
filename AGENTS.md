@@ -1,6 +1,6 @@
 # AI Futures Trading System - Agent Guidelines
 
-**文件版本**: 4.6.0
+**文件版本**: 4.6.1
 
 ## Overview
 
@@ -414,17 +414,17 @@ Example flow:
 
 When a strategy is created, the system automatically performs **two-stage verification**:
 
-1. **Stage 1: LLM Self-Review** (max 3 attempts)
+1. **Stage 1: LLM Self-Review** (single attempt)
    - Compares generated code with prompt description
    - Checks if logic correctly implements the strategy
-   - If fails: LLM attempts to fix the code
+   - If fails: **immediately returns failure** (no auto-retry)
 
-2. **Stage 2: Historical Backtest**
+2. **Stage 2: Historical Backtest** (only runs if Stage 1 passes)
    - Uses last 100 K-bars to test the strategy
    - Checks signal distribution (e.g., not all hold, not over-trading)
-   - If fails: returns to Stage 1
+   - If fails: returns error to user
 
-3. **On 3 failures**: Notifies user with error details, user must recreate strategy
+3. **On failure**: Notifies user with error details and log file link, user must redesign strategy
 
 #### Stage 1 Review Logging (New in v4.6.0)
 
@@ -1194,12 +1194,47 @@ src/web/
 ├── app.py               # Flask application factory
 └── routes/
     ├── status.py      # /api/status
-    ├── strategies.py # /api/strategies
-    ├── positions.py  # /api/positions
-    ├── orders.py    # /api/orders
-    ├── risk.py       # /api/risk
-    └── backtest.py   # /api/backtest
+    ├── strategies.py  # /api/strategies (含績效數據)
+    ├── positions.py    # /api/positions
+    ├── orders.py      # /api/orders
+    ├── risk.py        # /api/risk
+    ├── backtest.py    # /api/backtest
+    └── performance.py # /api/performance
 ```
+
+### Performance Page (v4.6.0+)
+
+The performance page (`/performance`) provides comprehensive strategy performance analysis:
+
+#### Features
+
+1. **Total Performance Section (Top)**
+   - Period selector: Today/Week/Month/Quarter/Year/All
+   - Statistics cards: Trade count, Win rate, Profit factor, Total PnL
+   - Charts: Equity curve (daily aggregation), Trade distribution
+
+2. **Individual Strategy Performance Section**
+   - Strategy selector dropdown
+   - Individual strategy statistics
+   - Individual equity curve and trade distribution charts
+   - Exit reason analysis (stop loss/take profit/signal reversal count)
+
+#### Data Source
+
+- Total performance: Merged closed signals from all strategies
+- Individual performance: Closed signals from that specific strategy
+- Time granularity:
+  - Total performance: Daily aggregation (one data point per day)
+  - Individual strategy: Per trade (one data point per trade)
+
+#### API Endpoints
+
+| Method | URL | Description |
+|--------|-----|-------------|
+| GET | `/api/performance` | Total performance (all strategies) |
+| GET | `/api/performance/<id>` | Individual strategy performance |
+
+**Query Parameter**: `period` (today/week/month/quarter/year/all)
 
 ### Strategy Creation Page
 
@@ -1425,3 +1460,59 @@ Before committing new templates:
    curl http://127.0.0.1:5001/api/orders
    ```
 6. **Add `console.log()`** in JavaScript to trace execution
+
+---
+
+## Version History
+
+### v4.6.1 (2026-03-01)
+
+#### Bug Fixes and Improvements
+
+**1. Daily P&L Display Fix**
+- Fixed "當日損益" display to include both realized and unrealized P&L
+- Added new `/api/performance` endpoint to calculate comprehensive daily performance metrics
+- Frontend now displays breakdown: "已實現: X | 未實現: Y"
+
+**2. Strategy Creation Enhancement**
+- Users can now customize strategy name during preview phase
+- Strategy naming simplified to unified format: `策略_<symbol>`
+- Removed keyword inference logic for name generation
+- Preview panel layout aligned with create page (strategy name position adjusted)
+- Button text changed from "讓 LLM 填充參數" to "**讓 LLM 設計策略**"
+
+**3. Parameter Validation**
+- Quantity validation: Must be >= 1 (returns 400 error if invalid)
+- Stop loss / Take profit: Now accepts 0 (disabled) or null (defaults to 0)
+- Allows users to create strategies without stop loss / take profit mechanisms
+
+**4. Strategy Direction Bug Fix**
+- Fixed bug where `from_dict` method didn't load `direction` field
+- Strategies now correctly display their configured direction (long/short/both)
+
+**6. Strategy Verification Flow Simplification**
+- Removed unused `max_attempts` parameter from `verify_strategy()` method
+- Clarified verification flow: Stage 1 (LLM Review) executes once, fails immediately if unsuccessful
+- No automatic retry mechanism - users must redesign strategy if Stage 1 fails
+- Updated docstring to clearly document the two-stage verification process
+
+**7. Stage 1 Review Log File Link**
+- When Stage 1 verification fails, a detailed log file is saved to `workspace/logs/stage1_review/`
+- Frontend now displays a link to open the log file in verification results
+- API response includes `stage1_log_file` path for easy debugging
+
+**Files Changed:**
+- `src/web/routes/performance.py` (new file)
+- `src/web/routes/create.py`
+- `src/web/app.py`
+- `src/web/templates/index.html`
+- `src/web/templates/create_strategy.html`
+- `src/trading/strategy.py`
+- `src/engine/llm_generator.py`
+- `src/agent/tools.py`
+
+### v4.6.0 (Previous)
+- Performance analysis page
+- Backtest API enhancements
+- Stage 1 review logging
+- Template guidelines

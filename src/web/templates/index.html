@@ -3,31 +3,31 @@
 {% block title %}系統總覽 - AISOTS{% endblock %}
 
 {% block content %}
+<!-- 系統狀態 + 策略概覽 合併 -->
 <div class="card">
     <div class="card-header">📊 系統狀態</div>
-    <div id="systemStatus">
-        <div class="loading">載入中...</div>
+    <div>
+        <div id="systemStatus">
+            <div class="loading">載入中...</div>
+        </div>
     </div>
 </div>
 
+<!-- 部位概覽 + 風控狀態 合併 -->
 <div class="card">
-    <div class="card-header">📋 策略概覽</div>
-    <div id="strategyOverview">
-        <div class="loading">載入中...</div>
-    </div>
-</div>
-
-<div class="card">
-    <div class="card-header">📦 部位概覽</div>
-    <div id="positionOverview">
-        <div class="loading">載入中...</div>
-    </div>
-</div>
-
-<div class="card">
-    <div class="card-header">🛡️ 風控狀態</div>
-    <div id="riskStatus">
-        <div class="loading">載入中...</div>
+    <div style="display: flex; gap: 30px; flex-wrap: wrap;">
+        <div style="flex: 1; min-width: 280px; border-right: 1px solid #eee; padding-right: 20px;">
+            <div style="font-weight: bold; margin-bottom: 10px; color: #333;">📦 部位概覽</div>
+            <div id="positionOverview">
+                <div class="loading">載入中...</div>
+            </div>
+        </div>
+        <div style="flex: 1; min-width: 250px; padding-left: 10px;">
+            <div style="font-weight: bold; margin-bottom: 10px; color: #333;">🛡️ 風控狀態</div>
+            <div id="riskStatus">
+                <div class="loading">載入中...</div>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -74,59 +74,59 @@
             const riskData = await riskRes.json();
             const perfData = await perfRes.json();
             
-            // System Status
+            // System Status + Strategy Overview Combined
+            const enabled = strategiesData.data?.filter(s => s.enabled).length || 0;
+            const total = strategiesData.count || 0;
+            const running = strategiesData.data?.filter(s => s.is_running).length || 0;
+            const pnl = perfData.success ? perfData.total_pnl : (positionsData.summary?.total_pnl || 0);
+            const pnlClass = pnl >= 0 ? 'color: #27ae60;' : 'color: #e74c3c;';
+            
             document.getElementById('systemStatus').innerHTML = `
-                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; text-align: center;">
-                    <div>
-                        <div style="font-size: 24px; font-weight: bold;">
-                            <span class="status-dot status-dot-green"></span>正常
-                        </div>
-                        <div style="color: #666; font-size: 12px;">系統連線</div>
+                <div style="display: flex; gap: 20px; flex-wrap: wrap; justify-content: center;">
+                    <div style="text-align: center;">
+                        <div style="font-size: 20px; font-weight: bold;"><span class="status-dot status-dot-green"></span> 正常</div>
+                        <div style="color: #666; font-size: 11px;">系統連線</div>
                     </div>
-                    <div>
-                        <div style="font-size: 24px; font-weight: bold;">${strategiesData.count || 0}</div>
-                        <div style="color: #666; font-size: 12px;">策略數</div>
+                    <div style="text-align: center;">
+                        <div style="font-size: 20px; font-weight: bold;">${total}</div>
+                        <div style="color: #666; font-size: 11px;">策略總數</div>
                     </div>
-                    <div>
-                        <div style="font-size: 24px; font-weight: bold;">${positionsData.summary?.total_quantity || 0}</div>
-                        <div style="color: #666; font-size: 12px;">部位口數</div>
+                    <div style="text-align: center;">
+                        <div style="font-size: 20px; font-weight: bold;">${enabled}</div>
+                        <div style="color: #666; font-size: 11px;">啟用</div>
                     </div>
-                    <div>
-                        <div style="font-size: 24px; font-weight: bold;">
-                            ${(perfData.success ? perfData.total_pnl : positionsData.summary?.total_pnl || 0).toLocaleString()}
-                        </div>
-                        <div style="color: #666; font-size: 12px;">當日損益</div>
-                        ${perfData.success ? `
+                    <div style="text-align: center;">
+                        <div style="font-size: 20px; font-weight: bold;">${running}</div>
+                        <div style="color: #666; font-size: 11px;">執行中</div>
+                    </div>
+                    <div style="text-align: center;">
+                        <div style="font-size: 20px; font-weight: bold;">${positionsData.summary?.total_quantity || 0}</div>
+                        <div style="color: #666; font-size: 11px;">部口數</div>
+                    </div>
+                    <div style="text-align: center;">
+                        <div style="font-size: 20px; font-weight: bold; ${pnlClass}">${pnl >= 0 ? '+' : ''}${pnl.toLocaleString()}</div>
+                        <div style="color: #666; font-size: 11px;">當日損益</div>
+                        ${perfData.success && perfData.realized_pnl !== undefined ? `
                         <div style="font-size: 10px; color: #999; margin-top: 2px;">
-                            已實現: ${perfData.realized_pnl.toLocaleString()} | 未實現: ${perfData.unrealized_pnl.toLocaleString()}
+                            已實現: ${perfData.realized_pnl?.toLocaleString() ?? 0} | 未實現: ${perfData.unrealized_pnl?.toLocaleString() ?? 0}
                         </div>
                         ` : ''}
                     </div>
                 </div>
             `;
             
-            // Strategy Overview
-            const enabled = strategiesData.data?.filter(s => s.enabled).length || 0;
-            const total = strategiesData.count || 0;
-            document.getElementById('strategyOverview').innerHTML = `
-                <div style="display: flex; gap: 30px;">
-                    <div>啟用: <strong>${enabled}</strong> / ${total}</div>
-                    <div>執行中: <strong>${strategiesData.data?.filter(s => s.is_running).length || 0}</strong></div>
-                </div>
-            `;
-            
             // Position Overview
             const positions = positionsData.data || [];
             if (positions.length === 0) {
-                document.getElementById('positionOverview').innerHTML = '<div class="empty-state">目前無部位</div>';
+                document.getElementById('positionOverview').innerHTML = '<div class="empty-state" style="padding: 20px;">目前無部位</div>';
             } else {
                 document.getElementById('positionOverview').innerHTML = positions.map(p => `
-                    <div class="position-item">
+                    <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee;">
                         <div>
                             <strong>${p.symbol}</strong> ${p.direction} ${p.quantity}口
-                            <span style="color: #666;">@ ${p.entry_price}</span>
+                            <span style="color: #666; font-size: 12px;">@ ${p.entry_price}</span>
                         </div>
-                        <div class="${p.pnl >= 0 ? 'pnl-positive' : 'pnl-negative'}">
+                        <div class="${p.pnl >= 0 ? 'pnl-positive' : 'pnl-negative'}" style="font-weight: bold;">
                             ${p.pnl >= 0 ? '+' : ''}${p.pnl.toLocaleString()}
                         </div>
                     </div>
@@ -136,25 +136,24 @@
             // Risk Status
             const risk = riskData.data || {};
             document.getElementById('riskStatus').innerHTML = `
-                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px;">
-                    <div>
+                <div style="display: flex; gap: 20px; flex-wrap: wrap; justify-content: center;">
+                    <div style="text-align: center;">
                         <div style="font-weight: bold;">${risk.daily_pnl?.toLocaleString() || 0}</div>
-                        <div style="color: #666; font-size: 12px;">當日損益</div>
+                        <div style="color: #666; font-size: 11px;">當日損益</div>
                     </div>
-                    <div>
+                    <div style="text-align: center;">
                         <div style="font-weight: bold;">${risk.current_position || 0} / ${risk.max_position || 0}</div>
-                        <div style="color: #666; font-size: 12px;">部位口數</div>
+                        <div style="color: #666; font-size: 11px;">部位限制</div>
                     </div>
-                    <div>
+                    <div style="text-align: center;">
                         <div style="font-weight: bold;">${risk.orders_this_minute || 0} / ${risk.max_orders_per_minute || 0}</div>
-                        <div style="color: #666; font-size: 12px;">下單頻率</div>
+                        <div style="color: #666; font-size: 11px;">下單頻率</div>
                     </div>
                 </div>
             `;
         } catch (e) {
             console.error('Error loading system status:', e);
             document.getElementById('systemStatus').innerHTML = '<div class="empty-state">載入失敗: ' + e.message + '</div>';
-            document.getElementById('strategyOverview').innerHTML = '<div class="empty-state">載入失敗</div>';
             document.getElementById('positionOverview').innerHTML = '<div class="empty-state">載入失敗</div>';
             document.getElementById('riskStatus').innerHTML = '<div class="empty-state">載入失敗</div>';
         }

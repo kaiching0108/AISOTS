@@ -97,7 +97,8 @@ class Strategy:
             params=data.get("params", {}),
             enabled=data.get("enabled", False),
             goal=data.get("goal"),
-            goal_unit=data.get("goal_unit", "daily")
+            goal_unit=data.get("goal_unit", "daily"),
+            direction=data.get("direction", "long")  # 載入交易方向
         )
         strategy.created_at = data.get("created_at", strategy.created_at)
         strategy.goal = data.get("goal")

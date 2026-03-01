@@ -1,0 +1,562 @@
+{% extends "base.html" %}
+
+{% block title %}績效分析 - AISOTS{% endblock %}
+
+{% block extra_css %}
+<style>
+    .filter-bar {
+        display: flex;
+        gap: 15px;
+        margin-bottom: 20px;
+        flex-wrap: wrap;
+        align-items: center;
+    }
+    .filter-bar select {
+        padding: 8px 12px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-size: 14px;
+        min-width: 200px;
+    }
+    .filter-bar .period-btns {
+        display: flex;
+        gap: 5px;
+    }
+    .filter-bar .period-btn {
+        padding: 8px 14px;
+        border: 1px solid #ddd;
+        background: white;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 13px;
+        transition: all 0.2s;
+    }
+    .filter-bar .period-btn:hover {
+        background: #f0f0f0;
+    }
+    .filter-bar .period-btn.active {
+        background: #3498db;
+        color: white;
+        border-color: #3498db;
+    }
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: 15px;
+        margin-bottom: 20px;
+    }
+    .stat-card {
+        background: white;
+        padding: 15px;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        text-align: center;
+    }
+    .stat-card .value {
+        font-size: 24px;
+        font-weight: bold;
+        margin-bottom: 5px;
+    }
+    .stat-card .label {
+        font-size: 12px;
+        color: #666;
+    }
+    .stat-card.positive .value { color: #27ae60; }
+    .stat-card.negative .value { color: #e74c3c; }
+    .perf-green { color: #27ae60; }
+    .perf-yellow { color: #f39c12; }
+    .perf-red { color: #e74c3c; }
+    .chart-container {
+        display: grid;
+        grid-template-columns: 2fr 1fr;
+        gap: 20px;
+        margin-bottom: 20px;
+    }
+    @media (max-width: 900px) {
+        .chart-container {
+            grid-template-columns: 1fr;
+        }
+    }
+    .chart-box {
+        background: white;
+        padding: 15px;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .chart-box h3 {
+        margin-bottom: 15px;
+        font-size: 16px;
+        color: #333;
+    }
+    .exit-reason-bar {
+        display: flex;
+        gap: 15px;
+        justify-content: center;
+        flex-wrap: wrap;
+    }
+    .exit-reason-item {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        padding: 8px 12px;
+        background: #f8f9fa;
+        border-radius: 4px;
+        font-size: 13px;
+    }
+    .exit-reason-item .count {
+        font-weight: bold;
+    }
+    .exit-reason-item.stop-loss .count { color: #e74c3c; }
+    .exit-reason-item.take-profit .count { color: #27ae60; }
+    .exit-reason-item.reversal .count { color: #f39c12; }
+    .empty-state {
+        text-align: center;
+        padding: 40px;
+        color: #999;
+    }
+    .loading {
+        text-align: center;
+        padding: 40px;
+        color: #666;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- 總績效區塊 -->
+<div class="card" style="border-left: 4px solid #3498db;">
+    <div class="card-header" style="background: linear-gradient(135deg, #3498db 0%, #5dade2 100%); color: white;">
+        📊 總績效 (全部策略)
+    </div>
+    
+    <div class="filter-bar">
+        <span>查看週期：</span>
+        <div class="period-btns">
+            <button class="period-btn" data-period="today" onclick="switchToTotal()">今日</button>
+            <button class="period-btn" data-period="week" onclick="switchToTotal()">本週</button>
+            <button class="period-btn active" data-period="month" onclick="switchToTotal()">本月</button>
+            <button class="period-btn" data-period="quarter" onclick="switchToTotal()">本季</button>
+            <button class="period-btn" data-period="year" onclick="switchToTotal()">本年</button>
+            <button class="period-btn" data-period="all" onclick="switchToTotal()">全部</button>
+        </div>
+    </div>
+    
+    <div id="totalStatsContainer">
+        <div class="loading">載入中...</div>
+    </div>
+</div>
+
+<!-- 總績效圖表 -->
+<div class="chart-container" id="totalChartContainer" style="display: none;">
+    <div class="chart-box">
+        <h3>📈 權益曲線 (總)</h3>
+        <canvas id="totalEquityChart"></canvas>
+    </div>
+    <div class="chart-box">
+        <h3>📊 交易分布 (總)</h3>
+        <canvas id="totalTradeDistChart"></canvas>
+    </div>
+</div>
+
+<hr style="margin: 30px 0; border: none; border-top: 1px solid #eee;">
+
+<!-- 個別策略績效區塊 -->
+<div class="card">
+    <div class="card-header">📋 各策略績效</div>
+    
+    <div class="filter-bar">
+        <select id="strategySelect">
+            <option value="">載入中...</option>
+        </select>
+        
+        <div class="period-btns">
+            <button class="period-btn" data-period="today">今日</button>
+            <button class="period-btn" data-period="week">本週</button>
+            <button class="period-btn active" data-period="month">本月</button>
+            <button class="period-btn" data-period="quarter">本季</button>
+            <button class="period-btn" data-period="year">本年</button>
+            <button class="period-btn" data-period="all">全部</button>
+        </div>
+    </div>
+    
+    <div id="statsContainer">
+        <div class="loading">請選擇策略...</div>
+    </div>
+</div>
+
+<div class="chart-container" id="chartContainer" style="display: none;">
+    <div class="chart-box">
+        <h3>權益曲線 (Equity Curve)</h3>
+        <canvas id="equityChart"></canvas>
+    </div>
+    <div class="chart-box">
+        <h3>交易分布</h3>
+        <canvas id="tradeDistChart"></canvas>
+    </div>
+</div>
+
+<div class="card" id="exitReasonCard" style="display: none;">
+    <div class="card-header">平倉原因分析</div>
+    <div class="exit-reason-bar" id="exitReasonBar"></div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let equityChart = null;
+let tradeDistChart = null;
+var currentPeriod = 'month';
+
+async function loadStrategies() {
+    try {
+        const response = await fetch('/api/strategies');
+        const data = await response.json();
+        
+        const select = document.getElementById('strategySelect');
+        select.innerHTML = '<option value="">請選擇策略</option>';
+        
+        if (data.success && data.data) {
+            data.data.forEach(s => {
+                const option = document.createElement('option');
+                option.value = s.id;
+                option.textContent = `${s.id} - ${s.name || s.id}`;
+                select.appendChild(option);
+            });
+            
+            if (data.data.length > 0) {
+                select.value = data.data[0].id;
+                loadPerformance();
+            }
+        }
+    } catch (e) {
+        console.error('載入策略失敗:', e);
+    }
+}
+
+async function loadPerformance() {
+    const strategyId = document.getElementById('strategySelect').value;
+    if (!strategyId) {
+        document.getElementById('statsContainer').innerHTML = '<div class="empty-state">請選擇策略</div>';
+        return;
+    }
+    
+    document.getElementById('statsContainer').innerHTML = '<div class="loading">載入中...</div>';
+    
+    try {
+        const response = await fetch(`/api/performance/${strategyId}?period=${currentPeriod}`);
+        const data = await response.json();
+        
+        if (!data.success) {
+            document.getElementById('statsContainer').innerHTML = '<div class="empty-state">載入失敗: ' + data.error + '</div>';
+            return;
+        }
+        
+        renderStats(data);
+        renderCharts(data);
+        renderExitReasons(data);
+        
+        document.getElementById('chartContainer').style.display = 'grid';
+        document.getElementById('exitReasonCard').style.display = 'block';
+    } catch (e) {
+        console.error('載入績效失敗:', e);
+        document.getElementById('statsContainer').innerHTML = '<div class="empty-state">載入失敗</div>';
+    }
+}
+
+function renderStats(data) {
+    const container = document.getElementById('statsContainer');
+    const totalPnl = data.total_pnl || 0;
+    const winRate = data.win_rate || 0;
+    const profitFactor = data.profit_factor || 0;
+    const maxDrawdown = data.max_drawdown || 0;
+    
+    container.innerHTML = `
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="value">${data.filled_signals || 0}</div>
+                <div class="label">交易次數</div>
+            </div>
+            <div class="stat-card">
+                <div class="value ${winRate >= 50 ? 'positive' : 'negative'}">${winRate.toFixed(1)}%</div>
+                <div class="label">勝率</div>
+            </div>
+            <div class="stat-card">
+                <div class="value ${profitFactor >= 1 ? 'positive' : 'negative'}">${profitFactor > 0 ? profitFactor.toFixed(2) : '-'}</div>
+                <div class="label">盈虧比</div>
+            </div>
+            <div class="stat-card ${totalPnl >= 0 ? 'positive' : 'negative'}">
+                <div class="value">${totalPnl >= 0 ? '+' : ''}${totalPnl.toLocaleString()}</div>
+                <div class="label">總損益</div>
+            </div>
+            <div class="stat-card">
+                <div class="value">${(data.avg_pnl || 0).toLocaleString()}</div>
+                <div class="label">平均損益</div>
+            </div>
+            <div class="stat-card negative">
+                <div class="value">-${maxDrawdown.toLocaleString()}</div>
+                <div class="label">最大回撤</div>
+            </div>
+            <div class="stat-card">
+                <div class="value positive">+${(data.avg_profit || 0).toLocaleString()}</div>
+                <div class="label">平均獲利</div>
+            </div>
+            <div class="stat-card">
+                <div class="value negative">-${(data.avg_loss || 0).toLocaleString()}</div>
+                <div class="label">平均虧損</div>
+            </div>
+        </div>
+    `;
+}
+
+function renderCharts(data) {
+    const equityData = data.equity_curve || [];
+    const tradeData = data.trade_distribution || [];
+    
+    // 確保 chart container 可見
+    document.getElementById('chartContainer').style.display = 'grid';
+    
+    // 獲取 canvas 元素
+    const equityCanvas = document.getElementById('equityChart');
+    const tradeCanvas = document.getElementById('tradeDistChart');
+    
+    // 完全銷毀舊圖表實例
+    if (equityChart) {
+        equityChart.destroy();
+        equityChart = null;
+    }
+    if (tradeDistChart) {
+        tradeDistChart.destroy();
+        tradeDistChart = null;
+    }
+    
+    // 創建新圖表
+    const equityCtx = equityCanvas.getContext('2d');
+    equityChart = new Chart(equityCtx, {
+        type: 'line',
+        data: {
+            labels: equityData.map(e => e.date),
+            datasets: [{
+                label: '累積損益',
+                data: equityData.map(e => e.pnl),
+                borderColor: '#3498db',
+                backgroundColor: 'rgba(52, 152, 219, 0.1)',
+                fill: true,
+                tension: 0.1
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: { display: false }
+            },
+            scales: {
+                y: {
+                    ticks: {
+                        callback: function(value) {
+                            return value.toLocaleString();
+                        }
+                    }
+                }
+            }
+        }
+    });
+    
+    const colors = tradeData.map(p => p >= 0 ? '#27ae60' : '#e74c3c');
+    const distCtx = document.getElementById('tradeDistChart').getContext('2d');
+    tradeDistChart = new Chart(distCtx, {
+        type: 'bar',
+        data: {
+            labels: tradeData.map((_, i) => `#${i + 1}`),
+            datasets: [{
+                label: '交易損益',
+                data: tradeData,
+                backgroundColor: colors
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: { display: false }
+            },
+            scales: {
+                y: {
+                    ticks: {
+                        callback: function(value) {
+                            return value.toLocaleString();
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+function renderExitReasons(data) {
+    const bar = document.getElementById('exitReasonBar');
+    const reasons = [
+        { key: 'stop_loss', label: '停損', count: data.stop_loss_count || 0, class: 'stop-loss' },
+        { key: 'take_profit', label: '止盈', count: data.take_profit_count || 0, class: 'take-profit' },
+        { key: 'signal_reversal', label: '訊號反轉', count: data.signal_reversal_count || 0, class: 'reversal' }
+    ];
+    
+    bar.innerHTML = reasons.map(r => `
+        <div class="exit-reason-item ${r.class}">
+            <span>${r.label}:</span>
+            <span class="count">${r.count}</span>
+            <span>次</span>
+        </div>
+    `).join('');
+}
+
+document.getElementById('strategySelect').addEventListener('change', loadPerformance);
+
+document.querySelectorAll('.period-btn').forEach(btn => {
+    btn.addEventListener('click', function() {
+        document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+        this.classList.add('active');
+        currentPeriod = this.dataset.period;
+        loadPerformance();
+    });
+});
+
+// 總績效相關函數
+let totalEquityChart = null;
+let totalTradeDistChart = null;
+
+function getPerfColor(value, type) {
+    if (type === 'win_rate') {
+        if (value >= 50) return 'perf-green';
+        if (value >= 40) return 'perf-yellow';
+        return 'perf-red';
+    } else if (type === 'profit_factor') {
+        if (value >= 1.5) return 'perf-green';
+        if (value >= 1.0) return 'perf-yellow';
+        return 'perf-red';
+    }
+    return '';
+}
+
+function switchToTotal() {
+    document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+    event.target.classList.add('active');
+    currentPeriod = event.target.dataset.period;
+    loadTotalPerformance();
+}
+
+async function loadTotalPerformance() {
+    try {
+        const response = await fetch(`/api/performance?period=${currentPeriod}`);
+        const data = await response.json();
+        
+        if (!data.success) {
+            document.getElementById('totalStatsContainer').innerHTML = '<div class="empty-state">載入失敗: ' + data.error + '</div>';
+            return;
+        }
+        
+        renderTotalStats(data);
+        renderTotalCharts(data);
+        
+        document.getElementById('totalChartContainer').style.display = 'grid';
+    } catch (e) {
+        console.error('載入總績效失敗:', e);
+        document.getElementById('totalStatsContainer').innerHTML = '<div class="empty-state">載入失敗</div>';
+    }
+}
+
+function renderTotalStats(data) {
+    const container = document.getElementById('totalStatsContainer');
+    const totalPnl = data.total_pnl || 0;
+    const winRate = data.win_rate || 0;
+    const profitFactor = data.profit_factor || 0;
+    
+    const periodText = {
+        'today': '今日',
+        'week': '本週',
+        'month': '本月',
+        'quarter': '本季',
+        'year': '本年',
+        'all': '全部'
+    };
+    
+    container.innerHTML = `
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="value">${data.total_trades || 0}</div>
+                <div class="label">交易次數</div>
+            </div>
+            <div class="stat-card">
+                <div class="value ${winRate >= 50 ? 'perf-green' : (winRate >= 40 ? 'perf-yellow' : 'perf-red')}">${winRate.toFixed(1)}%</div>
+                <div class="label">勝率</div>
+            </div>
+            <div class="stat-card">
+                <div class="value ${profitFactor >= 1.5 ? 'perf-green' : (profitFactor >= 1 ? 'perf-yellow' : 'perf-red')}">${profitFactor > 0 ? profitFactor.toFixed(2) : '-'}</div>
+                <div class="label">盈虧比</div>
+            </div>
+            <div class="stat-card ${totalPnl >= 0 ? 'positive' : 'negative'}">
+                <div class="value">${totalPnl >= 0 ? '+' : ''}${totalPnl.toLocaleString()}</div>
+                <div class="label">總損益</div>
+            </div>
+        </div>
+    `;
+}
+
+function renderTotalCharts(data) {
+    const equityData = data.equity_curve || [];
+    const tradeData = data.trade_distribution || [];
+    
+    if (totalEquityChart) totalEquityChart.destroy();
+    if (totalTradeDistChart) totalTradeDistChart.destroy();
+    
+    const equityCtx = document.getElementById('totalEquityChart').getContext('2d');
+    totalEquityChart = new Chart(equityCtx, {
+        type: 'line',
+        data: {
+            labels: equityData.map(e => e.date),
+            datasets: [{
+                label: '累積損益',
+                data: equityData.map(e => e.pnl),
+                borderColor: '#3498db',
+                backgroundColor: 'rgba(52, 152, 219, 0.1)',
+                fill: true,
+                tension: 0.1
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: { legend: { display: false } },
+            scales: {
+                y: {
+                    ticks: { callback: function(value) { return value.toLocaleString(); } }
+                }
+            }
+        }
+    });
+    
+    const colors = tradeData.map(p => p >= 0 ? '#27ae60' : '#e74c3c');
+    const distCtx = document.getElementById('totalTradeDistChart').getContext('2d');
+    totalTradeDistChart = new Chart(distCtx, {
+        type: 'bar',
+        data: {
+            labels: tradeData.map((_, i) => `#${i + 1}`),
+            datasets: [{
+                label: '交易損益',
+                data: tradeData,
+                backgroundColor: colors
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: { legend: { display: false } },
+            scales: {
+                y: {
+                    ticks: { callback: function(value) { return value.toLocaleString(); } }
+                }
+            }
+        }
+    });
+}
+
+loadStrategies();
+loadTotalPerformance();
+</script>
+{% endblock %}

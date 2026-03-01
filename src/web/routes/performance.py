@@ -6,62 +6,116 @@ bp = Blueprint('performance', __name__, url_prefix='/api')
 
 @bp.route('/performance', methods=['GET'])
 def get_performance():
-    """取得績效數據
+    """取得總績效數據（全部策略）
     
     Query Parameters:
-        period: 查詢週期 (today/week/month/quarter/year/all)，預設為 today
+        period: 查詢週期 (today/week/month/quarter/year/all)，預設為 all
         
     Returns:
-        包含當日損益（已實現 + 未實現）的績效數據
+        包含全部策略的已實現損益（未含未實現）的績效數據
     """
     try:
         tools = current_app.trading_tools
-        period = request.args.get('period', 'today')
-        
-        # 取得當前部位損益（未實現）
-        positions_summary = tools.position_mgr.get_positions_summary()
-        unrealized_pnl = positions_summary.get('total_pnl', 0)
+        period = request.args.get('period', 'all')
         
         # 計算已實現損益（從所有策略的已平倉訊號）
-        realized_pnl = 0
+        all_pnl_values = []
         total_trades = 0
         win_count = 0
         lose_count = 0
+        total_wins = 0
+        total_losses = 0
+        
+        # 收集所有策略的信號數據
+        all_signals = []
+        all_pnl_values = []
         
         # 取得所有策略
         strategies = tools.strategy_mgr.get_all_strategies()
+        analyzer = tools._get_performance_analyzer()
+        
+        # 各策略績效明細
+        strategy_performances = []
         
         for strategy in strategies:
             try:
-                # 使用 PerformanceAnalyzer 分析每個策略
-                analyzer = tools._get_performance_analyzer()
                 analysis = analyzer.analyze(strategy.id, period=period)
                 stats = analysis.get('signal_stats', {})
                 
-                # 累加已實現損益
-                pnl = stats.get('total_pnl', 0)
-                if pnl:
-                    realized_pnl += pnl
-                    total_trades += stats.get('filled_signals', 0)
-                    win_count += stats.get('win_count', 0)
-                    lose_count += stats.get('lose_count', 0)
+                trades = stats.get('filled_signals', 0)
+                if trades > 0:
+                    # 收集各策略的績效
+                    strategy_performances.append({
+                        "strategy_id": strategy.id,
+                        "strategy_name": strategy.name,
+                        "total_trades": trades,
+                        "win_rate": stats.get('win_rate', 0),
+                        "profit_factor": stats.get('profit_factor', 0),
+                        "total_pnl": stats.get('total_pnl', 0)
+                    })
+                
+                # 累加總數據
+                total_trades += trades
+                win_count += stats.get('win_count', 0)
+                lose_count += stats.get('lose_count', 0)
+                
+                # 收集 pnl 值用於計算 profit_factor 和 equity_curve
+                equity_curve = stats.get('equity_curve', [])
+                all_signals.extend(equity_curve)
+                
+                # 收集單筆交易PnL用於計算 profit_factor
+                trade_dist = stats.get('trade_distribution', [])
+                all_pnl_values.extend(trade_dist)
+                
+                # 計算總獲利和總虧損
+                for pnl in trade_dist:
+                    if pnl > 0:
+                        total_wins += pnl
+                    elif pnl < 0:
+                        total_losses += abs(pnl)
+                        
             except Exception as e:
                 # 忽略單一策略分析錯誤，繼續處理其他策略
                 continue
         
-        # 總損益 = 已實現 + 未實現
-        total_pnl = realized_pnl + unrealized_pnl
+        # 計算 profit_factor
+        profit_factor = 0
+        if total_losses > 0:
+            profit_factor = total_wins / total_losses
+        elif total_wins > 0:
+            profit_factor = float('inf')
+        
+        # 計算總損益
+        total_pnl = sum(all_pnl_values) if all_pnl_values else 0
+        
+        # 計算 equity_curve（按日期排序並合併）
+        equity_curve = {}
+        for item in all_signals:
+            date = item.get('date', '')
+            pnl = item.get('pnl', 0)
+            if date:
+                equity_curve[date] = equity_curve.get(date, 0) + pnl
+        
+        # 轉換為排序後的列表
+        equity_curve_list = [
+            {"date": k, "pnl": round(v, 2)} 
+            for k, v in sorted(equity_curve.items())
+        ]
         
         return jsonify({
             "success": True,
             "period": period,
-            "realized_pnl": realized_pnl,
-            "unrealized_pnl": unrealized_pnl,
-            "total_pnl": total_pnl,
             "total_trades": total_trades,
             "win_count": win_count,
             "lose_count": lose_count,
-            "win_rate": (win_count / total_trades * 100) if total_trades > 0 else 0
+            "win_rate": (win_count / total_trades * 100) if total_trades > 0 else 0,
+            "profit_factor": round(profit_factor, 2) if profit_factor != float('inf') else 0,
+            "total_pnl": round(total_pnl, 2) if total_pnl else 0,
+            "realized_pnl": round(total_pnl, 2) if total_pnl else 0,
+            "unrealized_pnl": 0,
+            "equity_curve": equity_curve_list,
+            "trade_distribution": [round(p, 2) for p in all_pnl_values] if all_pnl_values else [],
+            "strategy_performances": strategy_performances
         })
     except Exception as e:
         return jsonify({
@@ -113,6 +167,7 @@ def get_strategy_performance(strategy_id):
             "win_count": stats.get('win_count', 0),
             "lose_count": stats.get('lose_count', 0),
             "win_rate": stats.get('win_rate', 0),
+            "profit_factor": stats.get('profit_factor', 0),
             "total_pnl": stats.get('total_pnl', 0),
             "avg_pnl": stats.get('avg_pnl', 0),
             "avg_profit": stats.get('avg_profit', 0),
@@ -122,7 +177,9 @@ def get_strategy_performance(strategy_id):
             "max_drawdown": stats.get('max_drawdown', 0),
             "stop_loss_count": stats.get('stop_loss_count', 0),
             "take_profit_count": stats.get('take_profit_count', 0),
-            "signal_reversal_count": stats.get('signal_reversal_count', 0)
+            "signal_reversal_count": stats.get('signal_reversal_count', 0),
+            "equity_curve": stats.get('equity_curve', []),
+            "trade_distribution": stats.get('trade_distribution', [])
         })
     except Exception as e:
         return jsonify({
