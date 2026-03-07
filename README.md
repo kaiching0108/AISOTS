@@ -4,16 +4,18 @@
 
 ## 功能特色
 
-- 🤖 **AI 策略生成** - 用自然語言描述策略，LLM 自動生成程式碼
+- 🤖 **AI策略生成** - 用自然語言描述策略，LLM 自動生成程式碼
 - 🎯 **目標驅動策略** - 只需給出目標（如「每日賺500元」），LLM 自動推斷參數並確認後建立
 - 🔒 **策略驗證** - 建立策略時自動執行兩階段驗證（LLM審查比對程式碼是否符合策略描述 + 歷史K棒回測）
 - 📊 **歷史回測** - 執行完整歷史回測，啟用策略前參考過去績效（含圖表）
 - 📈 **自我優化系統** - 設定目標 → LLM 設計策略 → 執行 → 績效分析 → LLM 審查優化 → 達成目標
 - 🔔 **Telegram 通知** - 交易提醒、风控警告即时推送（仅通知，不接受命令）
-- 🌐 **Web 界面** - **主要操作平台**，图形化管理策略、部位、回测，无需记忆指令
+- 🌐 **Web 界面** - 图形化管理策略、部位、回测
 - 📊 **多種 LLM 支援** - Ollama, OpenAI, Anthropic, OpenRouter
 - 🛡️ **風控機制** - 單日虧損、最大部位、下單頻率限制
-- 💾 **資料持久化** - JSON 格式儲存策略、部位、訂單、訊號
+- 💾 **資料持久化** - JSON、SQLite 格式儲存策略、部位、訂單、訊號、歷史K-bar
+- ⚡ **模擬交易機制** - 模擬模式趨勢模擬演算法、回測、模擬下單
+
 
 ## 安裝
 
@@ -59,12 +61,30 @@ trading:
     night_start: "15:00"
     night_end: "05:00"
 
-# Web 界面配置（主要操作界面）
+# Web 界面配置（主要操作平台）
 web:
   enabled: true          # 啟用 Web 界面（主要操作平台）
   host: "127.0.0.1"     # 綁定位址（本機）
   port: 5001            # 連接埠
-```
+
+# K-bar 數據更新服務
+data_update:
+  enabled: true         # 開啟 K-bar 更新服務
+  update_time: "06:00" # 每日清晨抓取
+  
+  storage:              # 存儲配置
+    max_records: 600000 # 最大儲存量：60 萬筆
+  
+  initial_fetch:        # 初始抓取
+    daily_limit: 20000  # 初始每日上限
+    max_total: 300000   # 每個 symbol 最大總筆數
+  
+  daily:                # 每日定時抓取
+    daily_max: 10000    # 每日上限（所有 symbol 合計）
+
+# 自動 LLM Review
+auto_review:
+  enabled: false        # 是否啟用自動 Review
 
 ## 使用方式
 
@@ -111,21 +131,6 @@ python main.py --simulate
 
 ## 自我優化系統
 
-### 系統願景
-
-```
-用戶輸入目標 → LLM 設計策略 → 執行 → 績效分析 → LLM 審查優化 → 達成目標
-```
-
-### 目標設定
-
-每個策略可以設定明確的數值目標：
-
-| 欄位 | 說明 | 範例 |
-|------|------|------|
-| goal | 目標數值（必須為數字）| 500 |
-| goal_unit | 目標單位 | daily/weekly/monthly/quarterly/yearly |
-
 ### 完整優化流程
 
 ```
@@ -138,37 +143,6 @@ python main.py --simulate
 5. 用戶確認修改 → 更新策略
 6. 繼續執行 → 循環直到達成目標
 ```
-
-### LLM 建議類型
-
-LLM 審查後可能給出以下建議：
-
-| 類型 | 說明 | 範例 |
-|------|------|------|
-| 參數調整 | 修改停損、止盈、數量等 | 「停損太近，建議從 30 點改為 50 點」 |
-| Prompt 微調 | 修改交易邏輯描述 | 「建議加入 MACD 確認訊號」 |
-| 重新設計 | 完全重新設計策略 | 「 RSI 策略不適合當前市場」 |
-
-### 自動 LLM Review 支援自動定時觸發排程
-
-系統 LLM 審查，無需手動輸入命令：
-
-```yaml
-auto_review:
-  enabled: true
-  schedules:
-    - strategy_id: "TMF260001"
-      period: 5
-      unit: "day"      # 每 5 天觸發一次
-    - strategy_id: "TXF260001"
-      period: 2
-      unit: "week"     # 每 2 週觸發一次
-```
-
-**規則**：
-- 每天每策略最多觸發 1 次
-- 手動 `review` 命令不受限制
-- 無 goal 策略會跳過
 
 ## 專案結構
 
@@ -210,6 +184,18 @@ AISOTS/
 │   │   ├── data_service.py
 │   │   └── price_cache.py
 │   │
+
+│   ├── services/         # 背景服務
+│   │   ├── data_updater.py              # K-bar 數據更新服務
+│   │   └── realtime_kbar_aggregator.py  # 實時 K-bar 聚合器
+│   │
+
+│   ├── storage/          # 資料儲存
+│   │   ├── json_store.py
+│   │   └── models.py
+│   │
+│   ├── kbar_sqlite.py     # SQLite K 棒儲存（60 萬筆容量）
+│   │
 │   ├── storage/          # 資料儲存
 │   │   ├── json_store.py
 │   │   └── models.py
@@ -234,35 +220,19 @@ AISOTS/
 │   │   ├── performance_analyzer.py  # 績效分析器
 │   │   ├── strategy_reviewer.py     # LLM 策略審查
 │   │   └── auto_review_scheduler.py # 自動 Review 排程
-│   │
-│   └── config.py        # 配置載入
+
+│   ├── config.py        # 配置載入
+
+└── web/                # Web 界面（主要操作平台）
+    └── 图形化管理策略、部位、回測、交易訊息
+
 │
 ├── documents/           # 說明文件
 │   ├── Features.md
 │   ├── System_Architecture.md
 │   ├── User_Manual.md
-│   └── Web_Interface.md
-│
-├── tests/               # 測試檔案
-│   ├── test_trading.py
-│   ├── test_fallback.py
-│   ├── test_create_flow.py
-│   └── conftest.py
-│
-└── workspace/          # 執行時資料
-    ├── strategies/       # 策略配置（含版本）
-    │   └── TMF260001_v1.json
-    ├── positions/        # 部位記錄
-    │   └── TMF260001_positions.json
-    ├── orders/           # 訂單記錄
-    │   └── TMF260001_orders.json
-    ├── signals/         # 訊號記錄（含版本）
-    │   └── TMF260001_v1.json
-    ├── backtests/       # 回測圖表
-    │   └── TMF260001.png
-    ├── performance.json # 績效數據
-    └── logs/
-        └── trading.log
+│   ├── Web_Interface.md   # Web 界面使用說明
+│   └── SQLite_Storage.md  # K-bar 儲存規范
 ```
 
 ## 技術
