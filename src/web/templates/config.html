@@ -310,6 +310,89 @@ function renderForm(data) {
                 </div>
             </div>
             
+            <!-- K棒數據更新配置 -->
+            <div class="config-section">
+                <h3>K棒數據更新配置</h3>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="data_update_enabled" ${data.data_update.enabled ? 'checked' : ''}>
+                    <label for="data_update_enabled">啟用自動更新 K棒數據</label>
+                </div>
+                <div class="form-group" style="margin-top: 15px;">
+                    <label>每日更新時間</label>
+                    <input type="time" id="data_update_update_time" value="${data.data_update.update_time || '06:00'}">
+                    <div class="hint">每日定時抓取前一天數據的時間</div>
+                </div>
+                
+                <h4 style="color: #666; margin-top: 20px; margin-bottom: 10px;">每日抓取設定</h4>
+                <div class="row">
+                    <div class="form-group">
+                        <label>每次 API 呼叫抓取筆數</label>
+                        <input type="number" id="data_update_daily_records_per_call" 
+                               value="${data.data_update.daily?.records_per_call || 1000}" min="1" max="10000">
+                    </div>
+                    <div class="form-group">
+                        <label>每日最大 API 呼叫次數</label>
+                        <input type="number" id="data_update_daily_api_calls_per_day" 
+                               value="${data.data_update.daily?.api_calls_per_day || 10}" min="1" max="100">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>每日最大抓取筆數</label>
+                    <input type="number" id="data_update_daily_daily_max" 
+                           value="${data.data_update.daily?.daily_max || 10000}" min="1" max="100000">
+                </div>
+                
+                <h4 style="color: #666; margin-top: 20px; margin-bottom: 10px;">系統啓動時抓取設定</h4>
+                <div class="row">
+                    <div class="form-group">
+                        <label>每次 API 呼叫抓取筆數</label>
+                        <input type="number" id="data_update_initial_records_per_call" 
+                               value="${data.data_update.initial_fetch?.records_per_call || 1000}" min="1" max="10000">
+                    </div>
+                    <div class="form-group">
+                        <label>每日最大 API 呼叫次數</label>
+                        <input type="number" id="data_update_initial_api_calls_per_day" 
+                               value="${data.data_update.initial_fetch?.api_calls_per_day || 20}" min="1" max="100">
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="form-group">
+                        <label>每日最大抓取筆數</label>
+                        <input type="number" id="data_update_initial_daily_limit" 
+                               value="${data.data_update.initial_fetch?.daily_limit || 20000}" min="1" max="100000">
+                    </div>
+                    <div class="form-group">
+                        <label>初始最大總筆數</label>
+                        <input type="number" id="data_update_initial_max_total" 
+                               value="${data.data_update.initial_fetch?.max_total || 300000}" min="1000" max="1000000">
+                    </div>
+                </div>
+                
+                <h4 style="color: #666; margin-top: 20px; margin-bottom: 10px;">存儲設定</h4>
+                <div class="row">
+                    <div class="form-group">
+                        <label>最大保留記錄數</label>
+                        <input type="number" id="data_update_storage_max_records" 
+                               value="${data.data_update.storage?.max_records || 600000}" min="10000" max="1000000">
+                    </div>
+                    <div class="form-group">
+                        <label>清理閾值</label>
+                        <input type="number" id="data_update_storage_cleanup_threshold" 
+                               value="${data.data_update.storage?.cleanup_threshold || 700000}" min="10000" max="1000000">
+                    </div>
+                </div>
+                <div class="hint">當記錄數超過清理閾值時，自動刪除最舊的記錄以維持最大保留數</div>
+            </div>
+            
+            <!-- Auto Review 配置 -->
+            <div class="config-section">
+                <h3>自動策略審查配置</h3>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="auto_review_enabled" ${data.auto_review?.enabled ? 'checked' : ''}>
+                    <label for="auto_review_enabled">啟用自動策略審查</label>
+                </div>
+            </div>
+            
             <button type="submit" class="btn-save">儲存設定</button>
         </form>
     `;
@@ -363,6 +446,28 @@ async function saveConfig(event) {
             enabled: document.getElementById('web_enabled').checked,
             host: document.getElementById('web_host').value,
             port: parseInt(document.getElementById('web_port').value),
+        },
+        data_update: {
+            enabled: document.getElementById('data_update_enabled').checked,
+            update_time: document.getElementById('data_update_update_time').value,
+            daily: {
+                records_per_call: parseInt(document.getElementById('data_update_daily_records_per_call').value),
+                api_calls_per_day: parseInt(document.getElementById('data_update_daily_api_calls_per_day').value),
+                daily_max: parseInt(document.getElementById('data_update_daily_daily_max').value),
+            },
+            initial_fetch: {
+                records_per_call: parseInt(document.getElementById('data_update_initial_records_per_call').value),
+                api_calls_per_day: parseInt(document.getElementById('data_update_initial_api_calls_per_day').value),
+                daily_limit: parseInt(document.getElementById('data_update_initial_daily_limit').value),
+                max_total: parseInt(document.getElementById('data_update_initial_max_total').value),
+            },
+            storage: {
+                max_records: parseInt(document.getElementById('data_update_storage_max_records').value),
+                cleanup_threshold: parseInt(document.getElementById('data_update_storage_cleanup_threshold').value),
+            },
+        },
+        auto_review: {
+            enabled: document.getElementById('auto_review_enabled').checked,
         }
     };
     

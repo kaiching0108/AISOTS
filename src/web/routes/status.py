@@ -11,12 +11,14 @@ def get_status():
         tools = current_app.trading_tools
         status_text = tools.get_system_status()
         
-        # 解析文字狀態為 JSON
-        # 這裡需要從 get_system_status() 的回傳值解析
-        # 暫時簡單處理
+        sqlite_info = tools.get_sqlite_status()
+        
         return jsonify({
             "success": True,
-            "message": status_text
+            "message": status_text,
+            "sqlite": sqlite_info.get("symbols", {}),
+            "sqlite_total": sqlite_info.get("total", 0),
+            "sqlite_error": sqlite_info.get("error")
         })
     except Exception as e:
         return jsonify({

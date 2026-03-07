@@ -10,6 +10,21 @@ import matplotlib.pyplot as plt
 
 from loguru import logger
 
+from src.storage.kbar_manager import KBarManager
+
+
+class InsufficientDataError(Exception):
+    """SQLite 數據不足異常"""
+    def __init__(self, available_days: int, required_days: int, symbol: str, timeframe: str):
+        self.available_days = available_days
+        self.required_days = required_days
+        self.symbol = symbol
+        self.timeframe = timeframe
+        super().__init__(
+            f"SQLite 數據不足：{symbol} {timeframe} 只有 {available_days} 天，需要 {required_days} 天"
+        )
+
+
 WORKSPACE_DIR = Path("workspace")
 BACKTEST_DIR = WORKSPACE_DIR / "backtests"
 
@@ -222,6 +237,7 @@ class BacktestEngine:
             shioaji_client: ShioajiClient 實例
         """
         self.client = shioaji_client
+        self.kbar_manager = KBarManager(shioaji_client, WORKSPACE_DIR)
     
     def _get_timeframe_params(self, timeframe: str) -> tuple:
         """取得 timeframe 對應的參數
@@ -409,7 +425,8 @@ class BacktestEngine:
         initial_capital: float = 1_000_000,
         commission: float = 0,
         strategy_id: Optional[str] = None,
-        strategy_version: Optional[int] = None
+        strategy_version: Optional[int] = None,
+        use_mock: bool = False
     ) -> dict:
         """執行歷史回測
         
@@ -422,6 +439,7 @@ class BacktestEngine:
             commission: 已廢棄，請使用固定手續費
             strategy_id: 策略ID（用於保存圖片）
             strategy_version: 策略版本（用於保存圖片）
+            use_mock: 是否使用模擬數據（True=模擬，False=使用SQLite現有數據）
             
         Returns:
             dict: {
@@ -462,16 +480,77 @@ class BacktestEngine:
             
             # 計算 K 棒數量：根據 timeframe 計算每天的 K 棒數，再乘以天數
             kbars_per_day = self.KBARS_PER_DAY.get(timeframe, 96)
-            calculated_count = days * kbars_per_day
+            
+            # 先檢查 SQLite 數據是否足夠
+            is_connected = getattr(self.client, 'connected', False)
+            logger.info(f"SQLite 數據檢查: is_connected={is_connected}, has_kbar_db={hasattr(self.client, 'kbar_db')}, use_mock={use_mock}")
+            
+            available_days = None
+            actual_1m_count = 0
+            
+            # 始終檢查 SQLite 數據（無論 use_mock 是什麼）
+            if is_connected and hasattr(self.client, 'kbar_db') and self.client.kbar_db:
+                # SQLite 存儲的是 1m 原始數據，需要轉換為目標 timeframe
+                # 1m 數量 / kbars_per_day = 實際可用天數
+                # 例如：7286 條 1m 轉換為 1d = 7286 / 1440 ≈ 5 天
+                available_kbars = self.client.kbar_db.get_kbars(symbol, 0, 2147483647)
+                if available_kbars:
+                    actual_1m_count = len(available_kbars)
+                    # 使用 1m 的每日棒數來計算（因為 SQLite 存儲的是 1m）
+                    kbars_per_day_1m = self.KBARS_PER_DAY.get("1m", 1440)
+                    available_days = actual_1m_count / kbars_per_day_1m
+                    logger.info(f"SQLite 可用數據: {actual_1m_count} 條 1m = {available_days:.1f} 天 {timeframe} (需要 {days} 天)")
+                    
+                    # 數據不足時，詢問用戶（僅當 use_mock=true 時）
+                    if available_days < days:
+                        if use_mock:
+                            # 用戶選擇使用模擬數據，但數據不足，詢問用戶
+                            logger.info(f"SQLite 數據不足：只有 {available_days:.1f} 天 {timeframe}，需要 {days} 天")
+                            raise InsufficientDataError(
+                                available_days=int(available_days),
+                                required_days=days,
+                                symbol=symbol,
+                                timeframe=timeframe
+                            )
+                        # use_mock=false：用戶選擇使用現有數據，直接使用有限範圍數據
+            
+            # 計算 K 棒數量
+            if not use_mock and available_days and available_days < days:
+                # 使用現有數據時，限制範圍為可用天數
+                calculated_count = int(available_days) * kbars_per_day
+                days = int(available_days)
+                logger.info(f"使用現有數據：限制回測範圍為 {days} 天")
+            else:
+                calculated_count = days * kbars_per_day
+            
             # 取計算數量和最大限制的較小值
             kbars_count = min(calculated_count, self.MAX_KBARS)
             logger.info(f"K 棒數量: {days} 天 × {kbars_per_day} 棒/天 = {calculated_count} 棒 (限制: {self.MAX_KBARS} 棒)")
             
-            kbars_data = self.client.get_kbars(
-                contract, 
-                timeframe, 
-                count=kbars_count
-            )
+            # 優先從本地緩存獲取 K 棒數據
+            kbars_data = self.kbar_manager.get_kbars_cached(symbol, timeframe, kbars_count)
+            
+            if not kbars_data:
+                if use_mock:
+                    # 用戶選擇使用模擬數據
+                    logger.info(f"使用模擬數據進行回測: {symbol} {timeframe}")
+                    kbars_data = self.client._generate_mock_kbars(contract, timeframe, kbars_count)
+                else:
+                    # 使用 SQLite 現有數據
+                    logger.info(f"使用 SQLite 現有數據: {symbol} {timeframe}")
+                    if is_connected and hasattr(self.client, 'kbar_db') and self.client.kbar_db:
+                        # 從 SQLite 獲取數據（自動轉換 timeframe）
+                        kbars_data = self.client.kbar_db.get_kbars_with_conversion(
+                            symbol, 0, 2147483647, timeframe
+                        )
+                        logger.info(f"從 SQLite 獲取數據: {len(kbars_data.get('ts', []))} 條 {timeframe}")
+                    
+                    if not kbars_data or not kbars_data.get('ts'):
+                        # SQLite 也沒有數據，生成模擬數據
+                        logger.warning(f"無法獲取 SQLite 數據，使用模擬數據: {symbol} {timeframe}")
+                        kbars_data = self.client._generate_mock_kbars(contract, timeframe, kbars_count)
+            else:
+                logger.info(f"使用本地 K 棒緩存: {symbol} {timeframe}")
             
             if not kbars_data or not kbars_data.get("ts"):
                 return {
@@ -664,6 +743,9 @@ class BacktestEngine:
                 "chart_path": None,
                 "error": "請安裝 backtesting: pip install backtesting"
             }
+        except InsufficientDataError:
+            # 重新抛出 InsufficientDataError，让调用方（backtest.py）处理
+            raise
         except Exception as e:
             import traceback
             logger.error(f"Backtest error: {e}")

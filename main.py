@@ -18,6 +18,8 @@ from src.notify import TelegramNotifier, TelegramBot
 from src.agent import TradingTools, get_system_prompt
 from src.agent.providers import create_llm_provider
 from src.engine import StrategyRunner
+from src.services.data_updater import DataUpdater
+from src.services.realtime_kbar_aggregator import RealtimeKBarAggregator
 
 
 class AITradingSystem:
@@ -37,7 +39,7 @@ class AITradingSystem:
         self.max_history = 20  # 最多保存最近 20 條對話
         
         # 初始化各模組
-        workspace = get_workspace_dir()
+        self.workspace = get_workspace_dir()
         
         # Shioaji API
         self.shioaji = ShioajiClient(
@@ -57,13 +59,13 @@ class AITradingSystem:
         self.order_callback = OrderCallbackHandler()
         
         # 策略管理
-        self.strategy_mgr = StrategyManager(workspace)
+        self.strategy_mgr = StrategyManager(self.workspace)
         
         # 部位管理
-        self.position_mgr = PositionManager(workspace)
+        self.position_mgr = PositionManager(self.workspace)
         
         # 下單管理
-        self.order_mgr = OrderManager(workspace)
+        self.order_mgr = OrderManager(self.workspace)
         
         # 風控管理
         self.risk_mgr = RiskManager(self.config.risk.model_dump())
@@ -111,6 +113,14 @@ class AITradingSystem:
         
         # 自動 LLM Review 排程器
         self.auto_review_scheduler = None
+        
+        # K棒數據更新服務
+        self.data_updater = None
+        
+        # 實時 K-bar 聚合器（用於實盤）
+        self.realtime_aggregator = RealtimeKBarAggregator(
+            on_kbar_callback=self._on_realtime_kbar
+        )
         
         # 模擬價格趨勢追蹤（用於 _simulate_price_updates）
         self._price_trend = {}  # 記錄每個 symbol 的趨勢方向: 1=上漲, -1=下跌
@@ -169,11 +179,34 @@ class AITradingSystem:
             self.logger.error("Shioaji 登入失敗")
             return False
         
+        # 初始化 K棒數據更新服務
+        data_update_config = getattr(self.config, 'data_update', None)
+        if data_update_config and data_update_config.enabled:
+            self.data_updater = DataUpdater(
+                shioaji_client=self.shioaji,
+                workspace=self.workspace,
+                config=data_update_config.model_dump() if hasattr(data_update_config, 'model_dump') else data_update_config
+            )
+            self.logger.info("K棒數據更新服務已初始化")
+            
+            # 登入時檢查並更新 K棒數據（只要連線成功就執行）
+            if self.shioaji.connected:
+                self.logger.info("檢查 K棒數據更新...")
+                update_result = await self.data_updater.check_and_update_on_login()
+                if update_result.get('symbols_updated'):
+                    self.logger.info(f"K棒數據更新完成: {update_result['symbols_updated']}")
+                if update_result.get('symbols_need_fetch'):
+                    self.logger.info(f"需要抓取的期貨: {update_result['symbols_need_fetch']}")
+        
         # 設置策略運行器參考（讓模擬模式下能獲取動態價格）
         self.shioaji.set_strategy_runner(self.strategy_runner)
         
         # 從 Shioaji 取得可用期貨代碼
         self.trading_tools.update_valid_symbols()
+        
+        # 同步連線狀態到 ConnectionManager（避免 _main_loop 啟動時誤判斷線）
+        self.connection_mgr.is_connected = self.shioaji.connected
+        logger.info(f"連線狀態同步完成：shioaji.connected={self.shioaji.connected}, connection_mgr.is_connected={self.connection_mgr.is_connected}")
         
         # 設置連線事件處理
         self.connection_mgr.setup_event_handlers()
@@ -188,6 +221,10 @@ class AITradingSystem:
         # 綁定連線事件
         self.connection_mgr.on_disconnected = self._on_disconnected
         self.connection_mgr.on_reconnected = self._on_reconnected
+        
+        # 設置實盤報價回調（實時 K-bar 聚合）
+        if not self.config.shioaji.simulation and not self.shioaji.skip_login:
+            self._setup_tick_callback()
         
         # 顯示策略狀態
         strategies = self.strategy_mgr.get_all_strategies()
@@ -243,6 +280,51 @@ class AITradingSystem:
             "quantity": order.quantity,
             "timestamp": datetime.now().isoformat()
         })
+    
+    def _setup_tick_callback(self) -> None:
+        """設置實盤 tick 回調"""
+        import shioaji as sj
+        
+        @sj.EvHandler(self.shioaji.api.quote.on_tick_fop_v1)
+        def on_tick(tick):
+            try:
+                # 從 tick 提取合約代碼和價格
+                if hasattr(tick, 'code') and hasattr(tick, 'close'):
+                    symbol = tick.code
+                    if symbol in ['TXF', 'MXF', 'TMF']:
+                        price = tick.close
+                        volume = tick.volume if hasattr(tick, 'volume') else 0
+                        timestamp = tick.datetime
+                        
+                        # 處理 tick 數據
+                        self.realtime_aggregator.process_tick(
+                            symbol=symbol,
+                            price=price,
+                            volume=volume,
+                            timestamp=timestamp
+                        )
+            except Exception as e:
+                self.logger.error(f"Tick 處理錯誤: {e}")
+    
+    def _on_realtime_kbar(self, symbol: str, kbar_data: dict) -> None:
+        """實時 K-bar 生成回調
+        
+        Args:
+            symbol: 期貨代碼
+            kbar_data: K-bar 數據
+        """
+        from datetime import datetime
+        
+        # 將 K-bar 更新到策略執行器的 market_data_cache
+        self.strategy_runner.update_market_data(
+            symbol=symbol,
+            timestamp=datetime.fromtimestamp(kbar_data['ts']),
+            open_price=kbar_data['open'],
+            high=kbar_data['high'],
+            low=kbar_data['low'],
+            close=kbar_data['close'],
+            volume=kbar_data['volume']
+        )
     
     def _on_disconnected(self) -> None:
         """斷線回調"""
@@ -1066,7 +1148,11 @@ async def main():
         import threading
         from src.web.app import create_web_app
         
-        web_app = create_web_app(system.trading_tools, system.llm_provider)
+        web_app = create_web_app(
+            system.trading_tools, 
+            system.llm_provider,
+            system.data_updater  # 傳遞 DataUpdater
+        )
         web_thread = threading.Thread(
             target=web_app.run,
             kwargs={

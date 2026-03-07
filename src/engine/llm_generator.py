@@ -702,10 +702,26 @@ class LLMGenerator:
         # 初始編譯檢查
         strategy_class, compile_error = self.compile_strategy(code, class_name)
         if strategy_class is None:
-            # 編譯失敗，不再嘗試自動修復，直接返回錯誤
             error_msg = compile_error or "未知編譯錯誤"
-            logger.error(f"Initial compile failed: {error_msg}")
-            return {"passed": False, "error": f"程式碼編譯失敗: {error_msg}", "attempts": 1}
+            logger.warning(f"Initial compile failed: {error_msg}, attempting fix...")
+            
+            # 嘗試調用 fix_compile_error 修復
+            fix_result = await self.fix_compile_error(code, class_name, error_msg)
+            
+            if fix_result["fixed_code"]:
+                # 重新嘗試編譯修復後的程式碼
+                code = fix_result["fixed_code"]
+                strategy_class, compile_error = self.compile_strategy(code, class_name)
+                if strategy_class is None:
+                    # 修復後仍失敗
+                    error_msg = compile_error or "未知編譯錯誤"
+                    logger.error(f"Compile still failed after fix attempt: {error_msg}")
+                    return {"passed": False, "error": f"程式碼編譯失敗: {error_msg}", "attempts": 1}
+                logger.info("Successfully fixed compile error")
+            else:
+                # 無法修復
+                logger.error(f"Failed to fix compile error: {fix_result.get('error', 'Unknown error')}")
+                return {"passed": False, "error": f"程式碼編譯失敗: {error_msg}", "attempts": 1}
         
         attempt = 1
         logger.info(f"Starting verification (single attempt), direction={direction}")

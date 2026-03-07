@@ -1,20 +1,35 @@
 auto_review:
   enabled: false
+data_update:
+  daily:
+    api_calls_per_day: 10
+    daily_max: 10000
+    records_per_call: 1000
+  enabled: true
+  initial_fetch:
+    api_calls_per_day: 5
+    daily_limit: 60000
+    max_total: 300000
+    records_per_call: 10000
+  storage:
+    cleanup_threshold: 700000
+    max_records: 600000
+  update_time: 06:00
 llm:
   api_key: 
-  base_url: 
+  base_url: https://opencode.ai/zen/v1
   max_tokens: 2000
-  model: minimax-m2.5
+  model: minimax-m2.5-free
   provider: custom
   temperature: 0.7
 risk:
   enable_stop_loss: true
   enable_take_profit: true
   max_daily_loss: 10000
-  max_orders_per_minute: 1
+  max_orders_per_minute: 5
   max_position: 3
 shioaji:
-  api_key:
+  api_key: 
   secret_key: 
   simulation: true
 telegram:

@@ -29,3 +29,4 @@ python-telegram-bot>=20.0
 
 # Web Interface
 flask>=3.0
+flask-apscheduler>=1.13

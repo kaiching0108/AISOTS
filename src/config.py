@@ -92,6 +92,36 @@ class AutoReviewConfig(BaseModel):
     schedules: List[AutoReviewSchedule] = []
 
 
+class DataUpdateDailyConfig(BaseModel):
+    """每日定時抓取配置"""
+    records_per_call: int = 1000
+    api_calls_per_day: int = 10
+    daily_max: int = 10000
+
+
+class DataUpdateInitialFetchConfig(BaseModel):
+    """初始抓取配置"""
+    records_per_call: int = 1000
+    api_calls_per_day: int = 20
+    daily_limit: int = 20000
+    max_total: int = 300000
+
+
+class DataUpdateStorageConfig(BaseModel):
+    """存儲配置"""
+    max_records: int = 600000
+    cleanup_threshold: int = 700000
+
+
+class DataUpdateConfig(BaseModel):
+    """K棒數據更新配置"""
+    enabled: bool = True
+    update_time: str = "06:00"
+    daily: DataUpdateDailyConfig = DataUpdateDailyConfig()
+    initial_fetch: DataUpdateInitialFetchConfig = DataUpdateInitialFetchConfig()
+    storage: DataUpdateStorageConfig = DataUpdateStorageConfig()
+
+
 class WebConfig(BaseModel):
     """Web 界面配置"""
     enabled: bool = False
@@ -108,6 +138,7 @@ class AppConfig(BaseModel):
     strategies: list[StrategyConfig] = []
     auto_review: AutoReviewConfig = AutoReviewConfig()
     web: Optional[WebConfig] = None
+    data_update: Optional[DataUpdateConfig] = None
 
 
 def load_config(config_path: str = "config.yaml") -> AppConfig:

@@ -16,6 +16,8 @@ from src.storage.models import (
     PositionDirection,
 )
 from src.storage.trade_log_store import TradeLogStore
+from src.storage.kbar_store import KBarStore
+from src.storage.kbar_manager import KBarManager
 
 __all__ = [
     "JSONStore",
@@ -24,6 +26,8 @@ __all__ = [
     "OrderStore",
     "PerformanceStore",
     "TradeLogStore",
+    "KBarStore",
+    "KBarManager",
     "StrategyModel",
     "PositionModel",
     "OrderModel",

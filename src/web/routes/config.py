@@ -67,6 +67,16 @@ def get_config():
                 "enabled": config.get("web", {}).get("enabled", False),
                 "host": config.get("web", {}).get("host", "127.0.0.1"),
                 "port": config.get("web", {}).get("port", 5000),
+            },
+            "data_update": {
+                "enabled": config.get("data_update", {}).get("enabled", True),
+                "update_time": config.get("data_update", {}).get("update_time", "06:00"),
+                "daily": config.get("data_update", {}).get("daily", {}),
+                "initial_fetch": config.get("data_update", {}).get("initial_fetch", {}),
+                "storage": config.get("data_update", {}).get("storage", {}),
+            },
+            "auto_review": {
+                "enabled": config.get("auto_review", {}).get("enabled", False),
             }
         }
         
@@ -167,6 +177,21 @@ def update_config():
             if "port" in web_data:
                 current["port"] = web_data["port"]
             config["web"] = current
+        
+        if "data_update" in data:
+            data_update = data["data_update"]
+            current = config.get("data_update", {})
+            if "enabled" in data_update:
+                current["enabled"] = data_update["enabled"]
+            if "update_time" in data_update:
+                current["update_time"] = data_update["update_time"]
+            if "daily" in data_update:
+                current["daily"] = data_update["daily"]
+            if "initial_fetch" in data_update:
+                current["initial_fetch"] = data_update["initial_fetch"]
+            if "storage" in data_update:
+                current["storage"] = data_update["storage"]
+            config["data_update"] = current
         
         save_config_yaml(config)
         

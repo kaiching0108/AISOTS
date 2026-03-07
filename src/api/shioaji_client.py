@@ -1,16 +1,19 @@
 """Shioaji API 封裝"""
+import json
 import shioaji as sj
 from shioaji.constant import Action, FuturesPriceType, OrderType, FuturesOCType
 from typing import Optional, List, Dict, Any
 from datetime import datetime
+from pathlib import Path
 
 from src.logger import logger
+from src.storage.kbar_sqlite import KBarSQLite
 
 
 class ShioajiClient:
     """Shioaji API 客戶端封裝"""
     
-    # 類常量：Timeframe 價格波動率映射表（回測與實時交易共用）
+    # 類常量：Timeframe 價格波動率映射表（回測與模擬交易共用）
     # 基於台指期實際波動特性設定的經驗值
     TIMEFRAME_VOLATILITY = {
         "1m": 0.0003,   # 0.03%（約5-10點）
@@ -46,6 +49,11 @@ class ShioajiClient:
         
         # 策略運行器參考（用於模擬模式下獲取動態價格）
         self._strategy_runner = None
+        
+        # K棒 SQLite 存儲
+        workspace = Path(__file__).parent.parent.parent / 'workspace'
+        db_path = workspace / 'kbars.sqlite'
+        self.kbar_db = KBarSQLite(db_path)
     
     def set_strategy_runner(self, runner):
         """設置策略運行器參考（用於模擬模式下獲取動態價格）"""
@@ -81,11 +89,70 @@ class ShioajiClient:
             
             self.connected = True
             logger.info(f"登入成功 - 帳戶: {self.futopt_account}")
+            
+            # 保存合約資訊到文件
+            self.save_contracts()
+            
             return True
             
         except Exception as e:
             logger.error(f"登入失敗: {e}")
             self.connected = False
+            return False
+    
+    def save_contracts(self, filepath: str = "workspace/contracts.json") -> bool:
+        """保存 api.Contracts 到 JSON 文件
+        
+        使用 key + "R1" 獲取近月合約資訊
+        """
+        if not self.connected:
+            logger.warning("未登入，跳過保存合約資訊")
+            return False
+        
+        try:
+            contracts_data = {"futures": {}}
+            
+            # 保存期貨資訊 - 使用 key + "R1" 獲取近月合約
+            futures = self.api.Contracts.Futures
+            all_futures_keys = list(futures.keys())
+            logger.info(f"開始保存期貨合約資訊，共 {len(all_futures_keys)} 個 keys")
+            
+            success_count = 0
+            for key in all_futures_keys:
+                try:
+                    # 使用 key + "R1" 獲取近月合約
+                    near_month_code = key + "R1"
+                    contract = futures[near_month_code]
+                    
+                    if contract:
+                        contracts_data["futures"][key] = {
+                            "near_month_code": near_month_code,
+                            "name": getattr(contract, 'name', None),
+                            "symbol": getattr(contract, 'symbol', None),
+                            "category": getattr(contract, 'category', None),
+                            "delivery_month": getattr(contract, 'delivery_month', None),
+                            "unit": getattr(contract, 'unit', None),
+                        }
+                        success_count += 1
+                except Exception as inner_e:
+                    logger.debug(f"無法保存期貨合約 {key}: {inner_e}")
+            
+            logger.info(f"成功保存 {success_count} 個期貨合約資訊")
+            
+            # 寫入文件
+            path = Path(filepath)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(contracts_data, f, ensure_ascii=False, indent=2)
+            
+            logger.info(f"合約資訊已保存到: {filepath}")
+            logger.info(f"期貨數量: {len(contracts_data['futures'])}")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"保存合約資訊失敗: {e}")
             return False
     
     def logout(self) -> bool:
@@ -108,12 +175,15 @@ class ShioajiClient:
         Note:
             如果傳入基本代碼（TXF/MXF/TMF），會自動轉換為近月合約（TXFR1）
         """
-        # 模擬模式：直接返回模擬合約，不進行任何網路呼叫
-        if self.simulation or self.skip_login:
+        # 只有在未連接時才返回模擬合約
+        if not self.connected:
             if symbol not in self._contracts_cache:
                 mock_contract = self._create_mock_contract(symbol)
                 if mock_contract:
                     self._contracts_cache[symbol] = mock_contract
+            return self._contracts_cache.get(symbol)
+        
+        if symbol in self._contracts_cache:
             return self._contracts_cache.get(symbol)
         
         if symbol in self._contracts_cache:
@@ -287,13 +357,87 @@ class ShioajiClient:
         
         return new_price, trend, trend_duration + 1
     
-    def get_kbars(self, contract: Any, timeframe: str = "1D", count: int = 100) -> Optional[Any]:
-        """取得K線資料"""
-        if self.simulation or self.skip_login:
+    def get_kbars(self, contract: Any, timeframe: str = "1D", count: int = 100) -> Optional[Dict[str, list]]:
+        """取得 K 線資料
+        
+        Args:
+            contract: 期貨合約
+            timeframe: K 線週期 (1m/5m/15m/30m/1h/1d)
+            count: 需要獲取的 K 線數量
+        
+        Returns:
+            K 棒數據字典 (Dictionary with 'ts', 'open', 'high', 'low', 'close', 'volume')
+        """
+        from datetime import datetime, timedelta
+        
+        # 只有在 skip_login=True（模擬模式）時才生成模擬 K 線
+        if self.skip_login:
             return self._generate_mock_kbars(contract, timeframe, count)
         
+        # 嘗試從 SQLite 獲取數據
+        symbol = getattr(contract, 'symbol', None) or getattr(contract, 'code', None)
+        
+        # 使用實際合約代碼（如 TXFR1、MXFR1、TMFR1）直接查詢
+        if symbol:
+            # 計算時間範圍
+            KBARS_PER_DAY = {
+                "1m": 1440, "5m": 288, "15m": 96, 
+                "30m": 48, "1h": 24, "1d": 1,
+                "60m": 24
+            }
+            kbars_per_day = KBARS_PER_DAY.get(timeframe.lower(), 96)
+            days_needed = max(1, (count // kbars_per_day) + 10)
+            
+            end_ts = int(datetime.now().timestamp())
+            start_ts = int((datetime.now() - timedelta(days=days_needed)).timestamp())
+            
+            # 從 SQLite 獲取（自動轉換 symbol）
+            kbars = self.kbar_db.get_kbars_with_conversion(symbol, start_ts, end_ts, timeframe)
+            
+            if kbars and len(kbars.get('ts', [])) >= count:
+                logger.info(f"從 SQLite 獲取 {symbol} K 線數據：{len(kbars['ts'])} 條")
+                return kbars
+            elif kbars and len(kbars.get('ts', [])) > 0:
+                logger.info(f"從 SQLite 獲取 {symbol} K 線數據（不足）：{len(kbars['ts'])} 條")
+                return kbars
+        
+        # SQLite 沒有足夠數據，從 API 獲取
+        KBARS_PER_DAY = {
+            "1m": 1440, "5m": 288, "15m": 96, 
+            "30m": 48, "1h": 24, "1d": 1,
+            "60m": 24
+        }
+        kbars_per_day = KBARS_PER_DAY.get(timeframe.lower(), 96)
+        days_needed = max(1, (count // kbars_per_day) + 10)
+        
+        end_date = datetime.now().strftime("%Y-%m-%d")
+        start_date = (datetime.now() - timedelta(days=days_needed)).strftime("%Y-%m-%d")
+        
+        logger.info(f"從 API 獲取K線數據: {timeframe}, 數量={count}, 日期範圍={start_date} ~ {end_date}")
+        
         try:
-            return self.api.kbars(contract=contract, timeout=10000)
+            kbars = self.api.kbars(
+                contract=contract,
+                start=start_date,
+                end=end_date,
+                timeout=30000
+            )
+            result = {
+                "ts": list(kbars.ts),
+                "open": list(kbars.Open),
+                "high": list(kbars.High),
+                "low": list(kbars.Low),
+                "close": list(kbars.Close),
+                "volume": list(kbars.Volume),
+            }
+            
+            # 保存到 SQLite（使用實際合約代碼）
+            if symbol and result.get('ts'):
+                # contract.symbol 已經是實際合約代碼（如 TXFR1），直接使用
+                self.kbar_db.insert_kbars(symbol, result)
+                logger.info(f"已保存 {symbol} K 線數據到 SQLite: {len(result['ts'])} 條")
+            
+            return result
         except Exception as e:
             logger.error(f"取得K線失敗: {e}")
             return None
@@ -423,27 +567,33 @@ class ShioajiClient:
     def get_futures_name_mapping(self) -> Dict[str, str]:
         """取得期貨代碼與中文名稱的對應表"""
         result = {}
-        try:
-            futures = self.api.Contracts.Futures
-            if futures:
-                for attr in dir(futures):
-                    if not attr.startswith('_') and not attr.isupper():
-                        contract = getattr(futures, attr, None)
-                        if contract:
-                            name = getattr(contract, 'name', None) or getattr(contract, 'csname', None)
-                            if name:
-                                result[attr] = name
-                logger.info(f"從 Shioaji 取得期貨代碼對應表: {len(result)} 個")
-        except Exception as e:
-            logger.warning(f"取得期貨代碼對應表失敗: {e}")
         
-        if not result:
-            result = {
-                "TXF": "臺股期貨",
-                "MXF": "小型臺指",
-                "TMF": "微型臺指期貨"
-            }
-            logger.warning(f"使用預設期貨代碼對應表: {result}")
+        # 優先從 contracts.json 緩存文件讀取
+        filepath = Path("workspace/contracts.json")
+        if filepath.exists():
+            try:
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                
+                futures_data = data.get('futures', {})
+                for code, info in futures_data.items():
+                    name = info.get('name')
+                    if name:
+                        result[code] = name
+                
+                if result:
+                    logger.info(f"從緩存文件取得期貨代碼對應表: {len(result)} 個")
+                    return result
+            except Exception as e:
+                logger.warning(f"讀取緩存文件失敗: {e}")
+        
+        # 如果緩存文件不存在，使用默認值
+        result = {
+            "TXF": "臺股期貨",
+            "MXF": "小型臺指",
+            "TMF": "微型臺指期貨"
+        }
+        logger.warning(f"使用預設期貨代碼對應表: {result}")
         
         return result
     

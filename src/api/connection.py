@@ -11,7 +11,8 @@ class ConnectionManager:
     def __init__(self, shioaji_client, config: dict):
         self.client = shioaji_client
         self.config = config
-        self.is_connected = False
+        # 同步 ShioajiClient 的 connected 狀態，避免初始化時狀態不一致
+        self.is_connected = getattr(shioaji_client, 'connected', False)
         self.reconnect_count = 0
         self.max_reconnect = 50
         self.reconnect_interval = 5  # 秒

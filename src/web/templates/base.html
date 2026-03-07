@@ -411,6 +411,13 @@
                     <button class="btn" id="runNewBacktestBtn" style="padding: 12px; font-size: 14px; background: #f5f5f5; color: #333;">
                         🔄 執行新回測
                     </button>
+                    <!-- 數據不足時的按鈕 -->
+                    <button class="btn btn-primary" id="useMockDataBtn" style="padding: 12px; font-size: 14px; display: none;">
+                        🤖 使用模擬數據回測
+                    </button>
+                    <button class="btn" id="useExistingDataBtn" style="padding: 12px; font-size: 14px; background: #f5f5f5; color: #333; display: none;">
+                        📊 使用現有數據回測
+                    </button>
                 </div>
             </div>
             <div class="modal-footer">
@@ -747,11 +754,56 @@
             }
         }
         
-        async function executeBacktest(strategyId, strategyName) {
+        async function executeBacktest(strategyId, strategyName, useMock = false) {
             showBacktestResultModal(strategyName + ' - 回測結果');
             
             try {
-                const result = await apiCall('/api/backtest/' + strategyId, 'POST');
+                const result = await apiCall('/api/backtest/' + strategyId, 'POST', { use_mock: useMock });
+                
+                // 處理需要確認的情況（SQLite 數據不足）
+                if (result.needs_confirmation) {
+                    console.log('需要確認:', result);
+                    // 關閉當前結果 modal
+                    document.getElementById('backtestResultModal').classList.remove('active');
+                    
+                    // 顯示選擇對話框
+                    const modal = document.getElementById('backtestChoiceModal');
+                    const messageDiv = document.getElementById('backtestChoiceMessage');
+                    messageDiv.innerHTML = 
+                        '<strong>' + result.title + '</strong><br><br>' +
+                        result.message + '<br><br>' +
+                        '<span style="color: #666; font-size: 12px;">' +
+                        '選擇「使用模擬數據」：使用模擬K線進行回測（不消耗API流量）<br>' +
+                        '選擇「使用現有數據」：使用SQLite現有數據進行回測（數據範圍受限）' +
+                        '</span>';
+                    
+                    // 隱藏原本的按鈕，顯示數據不足時的按鈕
+                    document.getElementById('viewExistingReportBtn').style.display = 'none';
+                    document.getElementById('runNewBacktestBtn').style.display = 'none';
+                    document.getElementById('useMockDataBtn').style.display = 'block';
+                    document.getElementById('useExistingDataBtn').style.display = 'block';
+                    
+                    // 綁定按鈕事件
+                    document.getElementById('useMockDataBtn').onclick = function() {
+                        closeBacktestChoiceModal();
+                        executeBacktest(strategyId, strategyName, true);
+                    };
+                    
+                    document.getElementById('useExistingDataBtn').onclick = function() {
+                        closeBacktestChoiceModal();
+                        executeBacktest(strategyId, strategyName, false);
+                    };
+                    
+                    modal.classList.add('active');
+                    return;
+                }
+                
+                // 恢復按鈕狀態
+                document.getElementById('viewExistingReportBtn').style.display = 'block';
+                document.getElementById('runNewBacktestBtn').style.display = 'block';
+                document.getElementById('useMockDataBtn').style.display = 'none';
+                document.getElementById('useExistingDataBtn').style.display = 'none';
+                
                 if (result.success) {
                     // 如果有報告文字，直接顯示；否則嘗試從 report_path 加載
                     if (result.report && result.report.trim()) {

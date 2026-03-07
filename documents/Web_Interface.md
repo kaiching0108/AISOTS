@@ -171,7 +171,7 @@ src/web/templates/
 
 #### POST /api/strategies/confirm
 
-確認並生成策略代碼，執行兩階段驗證。
+確認並生成策略代碼。系統會先檢查程式碼編譯是否成功，若失敗會自動嘗試修復一次。編譯成功後執行兩階段驗證（Stage 1: LLM Review + Stage 2: Backtest）。
 
 **請求參數：**
 ```json
@@ -444,6 +444,7 @@ src/web/templates/
 
 3. **確認與驗證**
    - 點擊確認按鈕生成策略代碼
+   - 編譯檢查：若失敗，自動嘗試修復一次
    - 兩階段驗證（LLM Review + Backtest）
    - 進度條顯示當前階段
    - 回測圖表與分析說明
@@ -574,6 +575,67 @@ class BacktestEngine:
 - 避免回測時間過長
 - 確保用戶體驗
 - 足夠的歷史數據進行策略驗證
+
+---
+
+## 8.1 回測數據流程（v4.8.5+）
+
+### 完整流程
+
+```
+1. 用戶點擊「回測」按鈕
+   ↓
+2. 檢查是否存在現有回測報告
+   ↓
+3. 顯示選擇對話框
+   ├── 有現有報告 → 「查看報告」/ 「執行新回測」
+   └── 無現有報告 → 「執行回測」
+   ↓
+4. 用戶選擇「執行新回測」
+   ↓
+5. 檢查 SQLite 數據是否足夠
+   ↓
+6. 數據充足 → 直接使用 SQLite 數據執行回測
+   ↓
+7. 數據不足 → 返回 needs_confirmation → 顯示對話框
+   ├── 「使用模擬數據」→ 使用模擬 K-bar
+   └── 「使用現有數據」→ 使用 SQLite 有限範圍數據
+```
+
+### 數據來源優先級
+
+| 優先級 | 數據來源 | 說明 |
+|--------|----------|------|
+| 1 | SQLite | 從本地數據庫讀取 1m 數據，轉換為目標 timeframe |
+| 2 | 本地緩存 | 檢查 workspace/kbars/{symbol}/{timeframe}.json |
+| 3 | 模擬數據 | 當 SQLite 無數據時使用 Mock K-bar |
+
+### InsufficientDataError 處理
+
+當 SQLite 數據不足時，後端返回：
+
+```json
+{
+    "needs_confirmation": true,
+    "title": "數據不足",
+    "message": "SQlite 只有 6 天數據，回測需要 14 天。",
+    "available_days": 6,
+    "required_days": 14,
+    "symbol": "MXF",
+    "timeframe": "5m"
+}
+```
+
+前端顯示選擇對話框，讓用戶選擇：
+- **使用模擬數據**：調用 API 生成 Mock K-bar（不消耗 SQLite 數據）
+- **使用現有數據**：使用 SQLite 有限範圍數據（不調用 API）
+
+### API 調用限制（v4.10.0+）
+
+**回測過程中不會調用 Shioaji API 獲取新數據**，確保：
+- 不消耗 API 配額
+- 不會因 API 限制導致回測失敗
+- 回測結果完全基於本地數據
 
 ---
 

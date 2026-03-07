@@ -1,8 +1,10 @@
 """Backtest API Routes"""
-from flask import Blueprint, jsonify, current_app
+from flask import Blueprint, jsonify, current_app, request
 from pathlib import Path
 import re
 from datetime import datetime
+
+from src.engine.backtest_engine import InsufficientDataError
 
 bp = Blueprint('backtest', __name__, url_prefix='/api/backtest')
 
@@ -114,7 +116,24 @@ def run_backtest(strategy_id):
     """執行回測"""
     try:
         tools = current_app.trading_tools
-        result = tools.backtest_strategy(strategy_id)
+        
+        # 檢查是否使用模擬數據
+        use_mock = request.json.get('use_mock', False) if request.json else False
+        
+        # 處理 InsufficientDataError
+        try:
+            result = tools.backtest_strategy(strategy_id, use_mock=use_mock)
+        except InsufficientDataError as e:
+            return jsonify({
+                "needs_confirmation": True,
+                "title": "數據不足",
+                "message": f"SQlite 只有 {e.available_days} 天數據，回測需要 {e.required_days} 天。",
+                "use_mock": e.available_days < e.required_days,
+                "available_days": e.available_days,
+                "required_days": e.required_days,
+                "symbol": e.symbol,
+                "timeframe": e.timeframe,
+            })
         
         # backtest_strategy 返回的是 dict 或 str
         if isinstance(result, dict):
@@ -149,6 +168,17 @@ def run_backtest(strategy_id):
                 "chart_path": None,
                 "error": None
             })
+    except InsufficientDataError as e:
+        return jsonify({
+            "needs_confirmation": True,
+            "title": "數據不足",
+            "message": f"SQlite 只有 {e.available_days} 天數據，回測需要 {e.required_days} 天。",
+            "use_mock": True,
+            "available_days": e.available_days,
+            "required_days": e.required_days,
+            "symbol": e.symbol,
+            "timeframe": e.timeframe,
+        })
     except Exception as e:
         return jsonify({
             "success": False,

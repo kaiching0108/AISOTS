@@ -82,35 +82,69 @@
             const pnlClass = pnl >= 0 ? 'color: #27ae60;' : 'color: #e74c3c;';
             
             document.getElementById('systemStatus').innerHTML = `
-                <div style="display: flex; gap: 20px; flex-wrap: wrap; justify-content: center;">
-                    <div style="text-align: center;">
-                        <div style="font-size: 20px; font-weight: bold;"><span class="status-dot status-dot-green"></span> 正常</div>
-                        <div style="color: #666; font-size: 11px;">系統連線</div>
-                    </div>
-                    <div style="text-align: center;">
-                        <div style="font-size: 20px; font-weight: bold;">${total}</div>
-                        <div style="color: #666; font-size: 11px;">策略總數</div>
-                    </div>
-                    <div style="text-align: center;">
-                        <div style="font-size: 20px; font-weight: bold;">${enabled}</div>
-                        <div style="color: #666; font-size: 11px;">啟用</div>
-                    </div>
-                    <div style="text-align: center;">
-                        <div style="font-size: 20px; font-weight: bold;">${running}</div>
-                        <div style="color: #666; font-size: 11px;">執行中</div>
-                    </div>
-                    <div style="text-align: center;">
-                        <div style="font-size: 20px; font-weight: bold;">${positionsData.summary?.total_quantity || 0}</div>
-                        <div style="color: #666; font-size: 11px;">部口數</div>
-                    </div>
-                    <div style="text-align: center;">
-                        <div style="font-size: 20px; font-weight: bold; ${pnlClass}">${pnl >= 0 ? '+' : ''}${pnl.toLocaleString()}</div>
-                        <div style="color: #666; font-size: 11px;">當日損益</div>
-                        ${perfData.success && perfData.realized_pnl !== undefined ? `
-                        <div style="font-size: 10px; color: #999; margin-top: 2px;">
-                            已實現: ${perfData.realized_pnl?.toLocaleString() ?? 0} | 未實現: ${perfData.unrealized_pnl?.toLocaleString() ?? 0}
+                <div style="display: flex; gap: 30px; flex-wrap: wrap;">
+                    <div style="flex: 1; min-width: 250px;">
+                        <div style="display: flex; gap: 15px; flex-wrap: wrap; justify-content: center;">
+                            <div style="text-align: center;">
+                                <div style="font-size: 20px; font-weight: bold;"><span class="status-dot status-dot-green"></span> 正常</div>
+                                <div style="color: #666; font-size: 11px;">系統連線</div>
+                            </div>
+                            <div style="text-align: center;">
+                                <div style="font-size: 20px; font-weight: bold;">${total}</div>
+                                <div style="color: #666; font-size: 11px;">策略總數</div>
+                            </div>
+                            <div style="text-align: center;">
+                                <div style="font-size: 20px; font-weight: bold;">${enabled}</div>
+                                <div style="color: #666; font-size: 11px;">啟用</div>
+                            </div>
+                            <div style="text-align: center;">
+                                <div style="font-size: 20px; font-weight: bold;">${running}</div>
+                                <div style="color: #666; font-size: 11px;">執行中</div>
+                            </div>
+                            <div style="text-align: center;">
+                                <div style="font-size: 20px; font-weight: bold;">${positionsData.summary?.total_quantity || 0}</div>
+                                <div style="color: #666; font-size: 11px;">部口數</div>
+                            </div>
+                            <div style="text-align: center;">
+                                <div style="font-size: 20px; font-weight: bold; ${pnlClass}">${pnl >= 0 ? '+' : ''}${pnl.toLocaleString()}</div>
+                                <div style="color: #666; font-size: 11px;">當日損益</div>
+                                ${perfData.success && perfData.realized_pnl !== undefined ? `
+                                <div style="font-size: 10px; color: #999; margin-top: 2px;">
+                                    已實現: ${perfData.realized_pnl?.toLocaleString() ?? 0} | 未實現: ${perfData.unrealized_pnl?.toLocaleString() ?? 0}
+                                </div>
+                                ` : ''}
+                            </div>
                         </div>
-                        ` : ''}
+                    </div>
+                    <div style="flex: 1; min-width: 220px; border-left: 1px solid #eee; padding-left: 20px;">
+                        <div style="font-weight: bold; margin-bottom: 10px; color: #333;">💾 SQLite 數據</div>
+                        ${statusData.sqlite_error ? `
+                            <div style="color: #e74c3c; font-size: 12px;">${statusData.sqlite_error}</div>
+                        ` : `
+                            <div>
+                                ${Object.entries(statusData.sqlite || {}).map(([symbol, data]) => {
+                                    const count = typeof data === 'number' ? data : (data?.count || 0);
+                                    const workdayGaps = typeof data === 'object' ? (data?.workday_gaps || 0) : 0;
+                                    const tradingSuspicious = typeof data === 'object' ? (data?.trading_hours_suspicious || 0) : 0;
+                                    const hasIssues = workdayGaps > 0 || tradingSuspicious > 0;
+                                    return \`
+                                        <div style="margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid #f0f0f0;">
+                                            <div style="display: flex; justify-content: space-between; font-size: 13px;">
+                                                <span>\${hasIssues ? '⚠️' : '✅'} \${symbol}</span>
+                                                <span>\${Number(count).toLocaleString()} 筆</span>
+                                            </div>
+                                            <div style="font-size: 11px; color: #888; margin-top: 4px;">
+                                                <div>工作日缺口: \${workdayGaps} 天</div>
+                                                <div>交易時段異常: \${tradingSuspicious} 天</div>
+                                            </div>
+                                        </div>
+                                    \`;
+                                }).join('')}
+                                <div style="border-top: 1px solid #eee; margin-top: 8px; padding-top: 8px; font-weight: bold; font-size: 13px;">
+                                    總計：${Number(statusData.total || 0).toLocaleString()} 筆
+                                </div>
+                            </div>
+                        `}
                     </div>
                 </div>
             `;

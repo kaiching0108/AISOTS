@@ -2249,22 +2249,53 @@ set_goal {strategy_id} <目標金額> <單位>
         conn_status = self.api.connected
         
         text = f"""
-🔧 *系統狀態*
-────────────
-Shioaji: {'✅ 連線' if conn_status else '❌ 斷線'}
-策略數: {len(self.strategy_mgr.get_all_strategies())}
-啟用策略: {len(self.strategy_mgr.get_enabled_strategies())}
-部位數: {len(self.position_mgr.get_all_positions())}
-待處理訂單: {len(self.order_mgr.get_pending_orders())}
-"""
+ 🔧 *系統狀態*
+ ────────────
+ Shioaji: {'✅ 連線' if conn_status else '❌ 斷線'}
+ 策略數: {len(self.strategy_mgr.get_all_strategies())}
+ 啟用策略: {len(self.strategy_mgr.get_enabled_strategies())}
+ 部位數: {len(self.position_mgr.get_all_positions())}
+ 待處理訂單: {len(self.order_mgr.get_pending_orders())}
+ """
         
         return text
     
-    def backtest_strategy(self, strategy_id: str) -> str:
+    def get_sqlite_status(self) -> dict:
+        """取得 SQLite 數據狀態"""
+        try:
+            symbols = self.api.kbar_db.get_all_symbols()
+            
+            sqlite_data = {}
+            for symbol in symbols:
+                count = self.api.kbar_db.get_count(symbol)
+                
+                # 检查完整性
+                workday_check = self.api.kbar_db.check_workday_gaps(symbol)
+                trading_hours_check = self.api.kbar_db.check_trading_hours_completeness(symbol)
+                
+                sqlite_data[symbol] = {
+                    "count": count,
+                    "workday_gaps": workday_check.get("workday_gaps", 0),
+                    "weekend_gaps": workday_check.get("weekend_gaps", 0),
+                    "trading_hours_suspicious": trading_hours_check.get("suspicious_days", 0),
+                    "trading_hours_avg": trading_hours_check.get("avg_count", 0),
+                }
+            
+            total = sum(data["count"] for data in sqlite_data.values())
+            
+            return {
+                "symbols": sqlite_data,
+                "total": total
+            }
+        except Exception as e:
+            return {"error": str(e)}
+    
+    def backtest_strategy(self, strategy_id: str, use_mock: bool = False) -> str:
         """執行歷史回測
         
         Args:
             strategy_id: 策略 ID
+            use_mock: 是否使用模擬數據（True=模擬，False=使用SQLite現有數據）
             
         Returns:
             dict: {"report": str, "chart_path": str or None, "analysis": str or None, "metrics": dict}
@@ -2280,21 +2311,26 @@ Shioaji: {'✅ 連線' if conn_status else '❌ 斷線'}
             return {"report": f"❌ 策略缺少程式碼，無法執行回測", "chart_path": None, "analysis": None, "metrics": {}}
         
         try:
-            from src.engine.backtest_engine import BacktestEngine
+            from src.engine.backtest_engine import BacktestEngine, InsufficientDataError
             
             timeframe = strategy.params.get("timeframe", "15m")
             engine = BacktestEngine(self.api)
             
-            result = asyncio.run(engine.run_backtest(
-                strategy_code=strategy.strategy_code,
-                class_name=strategy.strategy_class_name,
-                symbol=strategy.symbol,
-                timeframe=timeframe,
-                initial_capital=1_000_000,
-                commission=0.0002,
-                strategy_id=strategy_id,
-                strategy_version=strategy.strategy_version
-            ))
+            try:
+                result = asyncio.run(engine.run_backtest(
+                    strategy_code=strategy.strategy_code,
+                    class_name=strategy.strategy_class_name,
+                    symbol=strategy.symbol,
+                    timeframe=timeframe,
+                    initial_capital=1_000_000,
+                    commission=0.0002,
+                    strategy_id=strategy_id,
+                    strategy_version=strategy.strategy_version,
+                    use_mock=use_mock
+                ))
+            except InsufficientDataError as e:
+                # 重新抛出 InsufficientDataError，让 backtest.py 处理
+                raise
             
             if result["passed"]:
                 return {
@@ -2308,6 +2344,9 @@ Shioaji: {'✅ 連線' if conn_status else '❌ 斷線'}
                 
         except ImportError as e:
             return {"report": f"❌ 請安裝 backtesting: pip install backtesting", "chart_path": None, "analysis": None, "metrics": {}}
+        except InsufficientDataError:
+            # 重新抛出 InsufficientDataError，让调用方处理
+            raise
         except Exception as e:
             logger.error(f"Backtest error: {e}")
             return {"report": f"❌ 回測發生錯誤: {str(e)}", "chart_path": None, "analysis": None, "metrics": {}}
