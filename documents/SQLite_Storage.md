@@ -132,4 +132,156 @@ print(f'代碼：{status["symbols"]}')
 
 ---
 
-**最後更新**: 2026-03-07
+## 6. fetch_log 表
+
+用於記錄補抓結果，避免重複檢查已確認的日期。
+
+### 表結構
+```sql
+CREATE TABLE IF NOT EXISTS fetch_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL,
+    check_date TEXT NOT NULL,
+    records_fetched INTEGER,
+    status TEXT,
+    checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(symbol, check_date)
+);
+```
+
+### 欄位說明
+| 欄位 | 類型 | 說明 |
+|------|------|------|
+| symbol | TEXT | 期貨代碼（如 TXFR1） |
+| check_date | TEXT | 檢查的日期 (YYYY-MM-DD) |
+| records_fetched | INTEGER | 取得的資料筆數 |
+| status | TEXT | 'success'（有資料）/ 'no_data'（無資料，假日）/ 'error'（錯誤） |
+| checked_at | TIMESTAMP | 檢查時間 |
+
+### 用途
+- 避免重複補抓已確認無資料的日期（假日）
+- 避免重複補抓已有資料的日期
+- 工作日缺口和交易時段異常檢查時排除已確認的日期
+
+---
+
+## 7. 完整性檢查方法
+
+### check_workday_gaps(symbol)
+檢查工作日是否有整日遺漏（排除已確認無資料的日期）。
+
+```python
+result = sqlite.check_workday_gaps('TXFR1')
+# 返回:
+{
+    "days_checked": 100,      # 檢查的天數
+    "workday_gaps": 2,        # 工作日缺口數（需補抓）
+    "weekend_gaps": 15,       # 週末天數（正常）
+    "workday_gap_dates": ['2026-02-13', '2026-02-14'],  # 缺口日期
+    "confirmed_no_data": 6     # 已確認無資料的天數
+}
+```
+
+### check_trading_hours_completeness(symbol)
+檢查交易時段數據完整性（排除已確認的日期）。
+
+```python
+result = sqlite.check_trading_hours_completeness('TXFR1')
+# 返回:
+{
+    "days_checked": 100,      # 檢查的天數
+    "avg_count": 830,         # 平均每天筆數
+    "suspicious_days": 1,      # 異常天數（低於平均95%）
+    "suspicious_details": [{   # 異常詳情
+        "date": "2026-03-06",
+        "count": 424,
+        "expected": 830,
+        "gap": 406
+    }],
+    "confirmed_no_data": 6,   # 已確認無資料的天數
+    "confirmed_with_data": 3  # 已確認有資料的天數
+}
+```
+
+### log_fetch_attempt(symbol, check_date, records_fetched, status)
+記錄補抓結果。
+
+```python
+# 記錄成功
+sqlite.log_fetch_attempt('TXFR1', '2026-03-06', 1140, 'success')
+
+# 記錄無資料（假日）
+sqlite.log_fetch_attempt('TXFR1', '2026-02-13', 0, 'no_data')
+```
+
+### get_confirmed_no_data_dates(symbol)
+獲取已確認無資料的日期集合。
+
+```python
+dates = sqlite.get_confirmed_no_data_dates('TXFR1')
+# 返回: {'2026-02-13', '2026-02-16', ...}
+```
+
+### get_confirmed_with_data_dates(symbol)
+獲取已確認有資料的日期集合。
+
+```python
+dates = sqlite.get_confirmed_with_data_dates('TXFR1')
+# 返回: {'2026-03-06', '2026-03-07', ...}
+```
+
+### get_confirmed_dates(symbol)
+獲取所有已確認的日期（不論成功或失敗）。
+
+```python
+dates = sqlite.get_confirmed_dates('TXFR1')
+# 返回: {'2026-02-13', '2026-03-06', ...}
+```
+
+---
+
+## 8. 時間戳格式規定
+
+**重要**：Shioaji API 返回的 timestamp 為**奈秒（nanoseconds）**格式，儲存到 SQLite 時需轉換為**秒（seconds）**。
+
+```python
+# 奈秒 → 秒轉換
+ts_sec = ts // 1_000_000_000 if isinstance(ts, (int, float)) and ts > 1e12 else int(ts)
+
+# 完整範例
+ts_list = list(kbars_raw.ts)
+kbars_data = {
+    "ts": [ts // 1_000_000_000 if isinstance(ts, (int, float)) and ts > 1e12 else int(ts) for ts in ts_list],
+    "open": list(kbars_raw.Open),
+    "high": list(kbars_raw.High),
+    "low": list(kbars_raw.Low),
+    "close": list(kbars_raw.Close),
+    "volume": list(kbars_raw.Volume),
+}
+```
+
+---
+
+## 9. API 方法總覽
+
+| 方法 | 說明 |
+|------|------|
+| `get_actual_code()` | 基本代碼 → 實際代碼 |
+| `get_base_code()` | 實際代碼 → 基礎代碼 |
+| `get_all_symbols()` | 獲取所有 symbol |
+| `insert_kbars()` | 插入 K 棒（自動轉換時間戳）|
+| `get_kbars()` | 範圍查詢 |
+| `get_latest_kbar()` | 最新 K 棒 |
+| `get_oldest_kbar()` | 最舊 K 棒 |
+| `get_count()` | 資料數量 |
+| `get_today_count()` | 今日數量 |
+| `check_workday_gaps()` | 檢查工作日缺口 |
+| `check_trading_hours_completeness()` | 檢查交易時段完整性 |
+| `log_fetch_attempt()` | 記錄補抓結果 |
+| `get_confirmed_no_data_dates()` | 獲取已確認無資料的日期 |
+| `get_confirmed_with_data_dates()` | 獲取已確認有資料的日期 |
+| `get_confirmed_dates()` | 獲取所有已確認的日期 |
+
+---
+
+**最後更新**: 2026-03-09

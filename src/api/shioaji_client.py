@@ -50,10 +50,13 @@ class ShioajiClient:
         # 策略運行器參考（用於模擬模式下獲取動態價格）
         self._strategy_runner = None
         
-        # K棒 SQLite 存儲
+        # K 棒 SQLite 存儲
         workspace = Path(__file__).parent.parent.parent / 'workspace'
         db_path = workspace / 'kbars.sqlite'
         self.kbar_db = KBarSQLite(db_path)
+        
+        # 追蹤已訂閱的 symbol（用於重連後重新訂閱）
+        self._subscribed_symbols: set = set()
     
     def set_strategy_runner(self, runner):
         """設置策略運行器參考（用於模擬模式下獲取動態價格）"""
@@ -789,10 +792,28 @@ class ShioajiClient:
         """訂閱報價"""
         # 模擬模式：跳過報價訂閱
         if self.simulation or self.skip_login:
-            logger.debug(f"模擬模式跳過報價訂閱: {symbol}")
+            logger.debug(f"模擬模式跳過報價訂閱：{symbol}")
             return True
         
         if not self.connected:
+            return False
+        
+        contract = self.get_contract(symbol)
+        if not contract:
+            return False
+        
+        try:
+            self.api.quote.subscribe(
+                contract,
+                quote_type=sj.constant.QuoteType[quote_type.upper()],
+                version=sj.constant.QuoteVersion.v1
+            )
+            # 追蹤已訂閱的 symbol
+            self._subscribed_symbols.add(symbol)
+            logger.debug(f"已訂閱 {symbol} (總計：{len(self._subscribed_symbols)})")
+            return True
+        except Exception as e:
+            logger.error(f"訂閱報價失敗：{e}")
             return False
         
         contract = self.get_contract(symbol)
@@ -842,10 +863,27 @@ class ShioajiClient:
         """設置報價回調"""
         self.api.quote.set_on_tick_fop_v1_callback(callback)
     
+    def resubscribe_all_quotes(self) -> int:
+        """重連後重新訂閱所有 symbol
+        
+        Returns:
+            成功訂閱的 symbol 數量
+        """
+        if not self.connected or self.skip_login:
+            return 0
+        
+        success_count = 0
+        for symbol in list(self._subscribed_symbols):
+            if self.subscribe_quote(symbol):
+                success_count += 1
+        
+        logger.info(f"重連後重新訂閱完成：{success_count}/{len(self._subscribed_symbols)}")
+        return success_count
+    
     def get_usage(self) -> Optional[Any]:
         """取得流量使用量"""
         try:
             return self.api.usage()
         except Exception as e:
-            logger.error(f"取得流量失敗: {e}")
+            logger.error(f"取得流量失敗：{e}")
             return None

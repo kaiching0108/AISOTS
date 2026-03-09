@@ -223,7 +223,8 @@ class AITradingSystem:
         self.connection_mgr.on_reconnected = self._on_reconnected
         
         # 設置實盤報價回調（實時 K-bar 聚合）
-        if not self.config.shioaji.simulation and not self.shioaji.skip_login:
+        # 只要已登入 Shioaji 就使用即時市場數據
+        if not self.shioaji.skip_login:
             self._setup_tick_callback()
         
         # 顯示策略狀態
@@ -283,12 +284,8 @@ class AITradingSystem:
     
     def _setup_tick_callback(self) -> None:
         """設置實盤 tick 回調"""
-        import shioaji as sj
-        
-        @sj.EvHandler(self.shioaji.api.quote.on_tick_fop_v1)
         def on_tick(tick):
             try:
-                # 從 tick 提取合約代碼和價格
                 if hasattr(tick, 'code') and hasattr(tick, 'close'):
                     symbol = tick.code
                     if symbol in ['TXF', 'MXF', 'TMF']:
@@ -296,7 +293,6 @@ class AITradingSystem:
                         volume = tick.volume if hasattr(tick, 'volume') else 0
                         timestamp = tick.datetime
                         
-                        # 處理 tick 數據
                         self.realtime_aggregator.process_tick(
                             symbol=symbol,
                             price=price,
@@ -304,8 +300,9 @@ class AITradingSystem:
                             timestamp=timestamp
                         )
             except Exception as e:
-                self.logger.error(f"Tick 處理錯誤: {e}")
-    
+                self.logger.error(f"Tick 處理錯誤：{e}")
+        
+        self.shioaji.set_quote_callback(on_tick)
     def _on_realtime_kbar(self, symbol: str, kbar_data: dict) -> None:
         """實時 K-bar 生成回調
         
@@ -334,6 +331,12 @@ class AITradingSystem:
     def _on_reconnected(self) -> None:
         """重連回調"""
         self.logger.info("Shioaji 重新連線")
+        
+        # 重新訂閱 tick 回調（重連後需要重新設置）
+        if not self.shioaji.skip_login:
+            self._setup_tick_callback()
+            self.logger.info("Tick 回調已重新訂閱")
+        
         self.notifier.send_message("✅ Shioaji 重新連線成功")
     
     async def start(self) -> None:
@@ -386,51 +389,63 @@ class AITradingSystem:
         
         # 模擬模式下，記錄上次價格更新時間
         last_price_update = datetime.now()
-        price_update_interval = 60  # 每60秒更新一次價格
+        price_update_interval = 60  # 每 60 秒更新一次價格
+        
+        # 連線狀態追蹤
+        last_connection_status = True
         
         while self.is_running:
             try:
-                # 1. 檢查連線
-                if not self.connection_mgr.is_connected:
-                    self.logger.warning("連線中斷，嘗試重連...")
-                    if not self.connection_mgr.handle_disconnect():
-                        self.logger.error("重連失敗")
-                        await asyncio.sleep(30)
-                        continue
+                # 1. 檢查連線狀態變化
+                current_connection_status = self.connection_mgr.is_connected
                 
-                # 模擬模式下，定時生成新價格數據
-                if self.config.shioaji.simulation or self.shioaji.skip_login:
+                if current_connection_status != last_connection_status:
+                    if current_connection_status:
+                        self.logger.info("✅ 連線已恢復")
+                    else:
+                        self.logger.warning("❌ 連線已中斷")
+                    last_connection_status = current_connection_status
+                
+                # 2. 連線中斷時暫停策略執行
+                if not self.connection_mgr.is_connected:
+                    self.logger.warning("⚠️ 策略執行已暫停 - 等待重連...")
+                    await self.connection_mgr.handle_disconnect_async()
+                    continue
+                
+                # 3. 模擬模式下（未登入），定時生成新價格數據
+                # 只要已登入 Shioaji，就使用真實 tick 數據
+                if self.shioaji.skip_login:
                     now = datetime.now()
                     if (now - last_price_update).seconds >= price_update_interval:
                         await self._simulate_price_updates()
                         last_price_update = now
                 
-                # 2. 更新部位價格
+                # 4. 更新部位價格
                 await self._update_positions()
                 
-                # 3. 檢查停損止盈
+                # 5. 檢查停損止盈
                 await self._check_stop_loss_take_profit()
                 
-                # 4. 執行策略訊號
+                # 6. 執行策略訊號
                 await self.strategy_runner.run_all_strategies()
                 
-                # 5. 更新當日損益
+                # 7. 更新當日損益
                 daily_pnl = self.shioaji.get_daily_pnl()
                 self.risk_mgr.update_daily_pnl(daily_pnl)
                 
-                # 6. 檢查是否需要強制停止
+                # 8. 檢查是否需要強制停止
                 if not self.risk_mgr.is_trading_allowed():
                     self.notifier.send_alert(
                         "風控停止",
                         f"單日虧損已達 {self.risk_mgr.max_daily_loss} 元，停止所有交易"
                     )
                 
-                # 7. 檢查自動 LLM Review 排程
+                # 9. 檢查自動 LLM Review 排程
                 if self.auto_review_scheduler:
                     self.auto_review_scheduler.check_and_trigger()
                 
             except Exception as e:
-                self.logger.error(f"主迴圈錯誤: {e}")
+                self.logger.error(f"主迴圈錯誤：{e}")
                 self.notifier.send_error(str(e))
             
             await asyncio.sleep(check_interval)
@@ -1127,7 +1142,7 @@ def parse_args():
     """解析命令行參數"""
     parser = argparse.ArgumentParser(description="AI 期貨交易系統")
     parser.add_argument("command", nargs="?", default="start", help="命令: start (預設)")
-    parser.add_argument("--simulate", action="store_true", help="模擬模式（跳過 API 登入）")
+    parser.add_argument("--simulate", action="store_true", help="完全模擬模式（不登入 Shioaji，使用模擬價格）")
     return parser.parse_args()
 
 
@@ -1151,7 +1166,8 @@ async def main():
         web_app = create_web_app(
             system.trading_tools, 
             system.llm_provider,
-            system.data_updater  # 傳遞 DataUpdater
+            system.data_updater,  # 傳遞 DataUpdater
+            system.connection_mgr  # 傳遞連線管理器
         )
         web_thread = threading.Thread(
             target=web_app.run,

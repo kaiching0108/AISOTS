@@ -81,13 +81,18 @@
             const pnl = perfData.success ? perfData.total_pnl : (positionsData.summary?.total_pnl || 0);
             const pnlClass = pnl >= 0 ? 'color: #27ae60;' : 'color: #e74c3c;';
             
+            const connStatus = statusData.connection?.status || 'disconnected';
+            const connIcon = connStatus === 'connected' ? '✅' : '❌';
+            const connText = connStatus === 'connected' ? '連線正常' : '連線中斷';
+            const connClass = connStatus === 'connected' ? 'status-dot-green' : 'status-dot-red';
+            
             document.getElementById('systemStatus').innerHTML = `
                 <div style="display: flex; gap: 30px; flex-wrap: wrap;">
                     <div style="flex: 1; min-width: 250px;">
                         <div style="display: flex; gap: 15px; flex-wrap: wrap; justify-content: center;">
                             <div style="text-align: center;">
-                                <div style="font-size: 20px; font-weight: bold;"><span class="status-dot status-dot-green"></span> 正常</div>
-                                <div style="color: #666; font-size: 11px;">系統連線</div>
+                                <div style="font-size: 20px; font-weight: bold;"><span class="status-dot ${connClass}"></span> ${connIcon} ${connText}</div>
+                                <div style="color: #666; font-size: 11px;">${statusData.connection?.reconnect_count !== undefined ? `重連：${statusData.connection.reconnect_count} 次` : '系統連線'}</div>
                             </div>
                             <div style="text-align: center;">
                                 <div style="font-size: 20px; font-weight: bold;">${total}</div>
@@ -118,33 +123,44 @@
                     </div>
                     <div style="flex: 1; min-width: 220px; border-left: 1px solid #eee; padding-left: 20px;">
                         <div style="font-weight: bold; margin-bottom: 10px; color: #333;">💾 SQLite 數據</div>
-                        ${statusData.sqlite_error ? `
-                            <div style="color: #e74c3c; font-size: 12px;">${statusData.sqlite_error}</div>
-                        ` : `
-                            <div>
-                                ${Object.entries(statusData.sqlite || {}).map(([symbol, data]) => {
-                                    const count = typeof data === 'number' ? data : (data?.count || 0);
-                                    const workdayGaps = typeof data === 'object' ? (data?.workday_gaps || 0) : 0;
-                                    const tradingSuspicious = typeof data === 'object' ? (data?.trading_hours_suspicious || 0) : 0;
-                                    const hasIssues = workdayGaps > 0 || tradingSuspicious > 0;
-                                    return \`
-                                        <div style="margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid #f0f0f0;">
-                                            <div style="display: flex; justify-content: space-between; font-size: 13px;">
-                                                <span>\${hasIssues ? '⚠️' : '✅'} \${symbol}</span>
-                                                <span>\${Number(count).toLocaleString()} 筆</span>
-                                            </div>
-                                            <div style="font-size: 11px; color: #888; margin-top: 4px;">
-                                                <div>工作日缺口: \${workdayGaps} 天</div>
-                                                <div>交易時段異常: \${tradingSuspicious} 天</div>
-                                            </div>
+                        {% raw %}
+                                ${statusData.sqlite_error ? `
+                                    <div style="color: #e74c3c; font-size: 12px;">${statusData.sqlite_error}</div>
+                                ` : `
+                                    <div>
+                                        ${Object.entries(statusData.sqlite || {}).map(([symbol, data]) => {
+                                            const count = typeof data === 'number' ? data : (data?.count || 0);
+                                            const totalDays = typeof data === 'object' ? (data?.total_days || 0) : 0;
+                                            const latestDate = typeof data === 'object' ? (data?.latest_date || '-') : '-';
+                                            const workdayGaps = typeof data === 'object' ? (data?.workday_gaps || 0) : 0;
+                                            const tradingSuspicious = typeof data === 'object' ? (data?.trading_hours_suspicious || 0) : 0;
+                                            const hasIssues = workdayGaps > 0 || tradingSuspicious > 0;
+                                            return `
+                                                <div style="margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid #f0f0f0;">
+                                                    <div style="display: flex; justify-content: space-between; font-size: 13px;">
+                                                        <span>${hasIssues ? '⚠️' : '✅'} ${symbol}</span>
+                                                        <span>${Number(count).toLocaleString()} 筆</span>
+                                                    </div>
+                                                    <div style="font-size: 11px; color: #666; margin-top: 4px;">
+                                                        <div>📅 ${totalDays} 天 | 最新: ${latestDate}</div>
+                                                    </div>
+                                                    <div style="font-size: 11px; color: #888; margin-top: 2px;">
+                                                        <div>工作日缺口: ${workdayGaps} 天</div>
+                                                        <div>交易時段異常: ${tradingSuspicious} 天</div>
+                                                    </div>
+                                                </div>
+                                            `;
+                                        }).join('')}
+                                        <div style="border-top: 1px solid #eee; margin-top: 8px; padding-top: 8px; font-weight: bold; font-size: 13px;">
+                                            總計：${Number(statusData.total || 0).toLocaleString()} 筆
                                         </div>
-                                    \`;
-                                }).join('')}
-                                <div style="border-top: 1px solid #eee; margin-top: 8px; padding-top: 8px; font-weight: bold; font-size: 13px;">
-                                    總計：${Number(statusData.total || 0).toLocaleString()} 筆
-                                </div>
-                            </div>
-                        `}
+                                        <button id="fetchMissingBtn" onclick="fetchMissingData()" 
+                                            style="margin-top: 10px; padding: 6px 12px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">
+                                            🔄 獲取缺失數據
+                                        </button>
+                                    </div>
+                                `}
+                        {% endraw %}
                     </div>
                 </div>
             `;
@@ -190,6 +206,30 @@
             document.getElementById('systemStatus').innerHTML = '<div class="empty-state">載入失敗: ' + e.message + '</div>';
             document.getElementById('positionOverview').innerHTML = '<div class="empty-state">載入失敗</div>';
             document.getElementById('riskStatus').innerHTML = '<div class="empty-state">載入失敗</div>';
+        }
+    }
+    
+    // 獲取缺失數據
+    async function fetchMissingData() {
+        const btn = document.getElementById('fetchMissingBtn');
+        btn.disabled = true;
+        btn.textContent = '🔄 獲取中...';
+        
+        try {
+            const response = await fetch('/api/sqlite/fetch-missing', { method: 'POST' });
+            const data = await response.json();
+            
+            if (data.success) {
+                alert('✅ 獲取完成！共獲取 ' + data.result.total_fetched + ' 筆數據');
+                loadSystemStatus();
+            } else {
+                alert('❌ 獲取失敗：' + (data.error || '未知錯誤'));
+            }
+        } catch (e) {
+            alert('❌ 請求失敗：' + e.message);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = '🔄 獲取缺失數據';
         }
     }
     

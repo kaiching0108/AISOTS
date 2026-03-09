@@ -1,5 +1,6 @@
 """Status API Routes"""
 from flask import Blueprint, jsonify, current_app
+from datetime import datetime
 
 bp = Blueprint('status', __name__, url_prefix='/api')
 
@@ -13,12 +14,28 @@ def get_status():
         
         sqlite_info = tools.get_sqlite_status()
         
+        # 取得連線狀態
+        connection_status = "disconnected"
+        reconnect_count = 0
+        last_check_time = None
+        
+        if hasattr(current_app, 'connection_mgr') and current_app.connection_mgr:
+            conn_mgr = current_app.connection_mgr
+            connection_status = "connected" if conn_mgr.is_connected else "disconnected"
+            reconnect_count = getattr(conn_mgr, 'reconnect_count', 0)
+            last_check_time = datetime.now().isoformat()
+        
         return jsonify({
             "success": True,
             "message": status_text,
             "sqlite": sqlite_info.get("symbols", {}),
             "sqlite_total": sqlite_info.get("total", 0),
-            "sqlite_error": sqlite_info.get("error")
+            "sqlite_error": sqlite_info.get("error"),
+            "connection": {
+                "status": connection_status,
+                "reconnect_count": reconnect_count,
+                "last_check": last_check_time
+            }
         })
     except Exception as e:
         return jsonify({

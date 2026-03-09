@@ -4,13 +4,14 @@ from flask_apscheduler import APScheduler
 from loguru import logger
 
 
-def create_web_app(trading_tools, llm_provider=None, data_updater=None):
+def create_web_app(trading_tools, llm_provider=None, data_updater=None, connection_mgr=None):
     """建立 Flask 應用
     
     Args:
         trading_tools: TradingTools 實例
         llm_provider: LLM Provider 實例
         data_updater: DataUpdater 實例（可選）
+        connection_mgr: ConnectionManager 實例（可選）
         
     Returns:
         Flask 應用
@@ -22,10 +23,11 @@ def create_web_app(trading_tools, llm_provider=None, data_updater=None):
     app = Flask(__name__)
     app.config['SECRET_KEY'] = 'aisots-web-secret-key'
     
-    # 儲存 trading_tools 引用
+    # 儲存引用
     app.trading_tools = trading_tools
     app.llm_provider = llm_provider
     app.data_updater = data_updater
+    app.connection_mgr = connection_mgr
     
     # 初始化 Flask-APScheduler
     if data_updater:
@@ -67,6 +69,7 @@ def create_web_app(trading_tools, llm_provider=None, data_updater=None):
     from src.web.routes import orders
     from src.web.routes import trade_logs
     from src.web.routes import performance
+    from src.web.routes import sqlite
     
     app.register_blueprint(status.bp)
     app.register_blueprint(strategies.bp)
@@ -78,6 +81,7 @@ def create_web_app(trading_tools, llm_provider=None, data_updater=None):
     app.register_blueprint(orders.bp)
     app.register_blueprint(trade_logs.bp)
     app.register_blueprint(performance.bp)
+    app.register_blueprint(sqlite.bp)
     
     # 提供 workspace 目录下的文件访问（如回测图表）
     import os

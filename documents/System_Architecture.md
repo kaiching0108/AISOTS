@@ -946,12 +946,30 @@ cerebro.addanalyzer(bt.analyzers.AnnualReturn, _name='annual_return')
 失敗 → 阻擋並回報原因
 ```
 
-### 7.2 斷線處理
+### 7.2 斷線處理（v0.5.0+）
 
-- 自動偵測連線狀態
-- 最多重連50次
-- 每次重連間隔5秒
-- 斷線時發送 Telegram 通知
+#### 異步重連機制
+- **異步方法**：`handle_disconnect_async()` 使用 `asyncio.sleep()`
+- **同步包裝**：`handle_disconnect()` 保留作為同步環境的包裝
+- **不阻塞事件迴圈**：避免 Web UI 在重連期間無法響應
+
+#### 斷線期間策略執行
+- 主循環每次迭代檢查 `connection_mgr.is_connected` 狀態
+- 斷線時：
+  1. 跳過策略執行（`run_all_strategies()`）
+  2. 跳過部位價格更新
+  3. 跳過停損止盈檢查
+  4. 呼叫 `handle_disconnect_async()` 嘗試重連
+- 重連成功後自動恢復策略執行
+
+#### 重連後恢復
+- 觸發 `on_reconnected` 回調
+- 重新訂閱 tick 數據（`resubscribe_all_quotes()`）
+- 恢復主循環正常執行
+
+#### 連線狀態顯示
+- Web UI 首頁動態顯示連線狀態（✅/❌ 圖示 + 重連次數）
+- `/api/status` API 返回 `connection` 欄位
 
 ### 7.3 LLM 失敗處理
 
@@ -1000,8 +1018,11 @@ cerebro.addanalyzer(bt.analyzers.AnnualReturn, _name='annual_return')
 | 0.4.15 | 2026-03-05 | 修正連線狀態同步問題（ConnectionManager.is_connected 與 ShioajiClient.connected 一致） |
 | 0.4.16 | 2026-03-06 | 回測數據流程優化：檢查現有報告、SQLite 數據不足時詢問用戶、移除 API 調用 |
 | 0.4.17 | 2026-03-07 | DataUpdater 優化：預先計算時間區間、強制往前推進、支援連假處理 |
+| 0.4.18 | 2026-03-08 | SQLite 數據完整性檢查：工作日缺口/交易時段異常檢測 |
+| 0.5.0 | 2026-03-09 | 異步重連機制：新增 handle_disconnect_async() 不阻塞事件迴圈；斷線期間暫停策略執行；Web UI 首頁顯示連線狀態 |
 
 ---
+
 n
 ## 9. 技術支援
 

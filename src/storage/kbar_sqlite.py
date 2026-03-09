@@ -75,6 +75,18 @@ class KBarSQLite:
                 ON kbars(symbol)
             """)
             
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS fetch_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    symbol TEXT NOT NULL,
+                    check_date TEXT NOT NULL,
+                    records_fetched INTEGER,
+                    status TEXT,
+                    checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(symbol, check_date)
+                )
+            """)
+            
             conn.commit()
         
         logger.info(f"KBarSQLite 数据库初始化完成: {self.db_path}")
@@ -288,31 +300,33 @@ class KBarSQLite:
             return [row[0] for row in cursor.fetchall()]
     
     def check_workday_gaps(self, symbol: str) -> dict:
-        """检查工作日是否有遗漏（整天）
+        """檢查工作日是否有遺漏（整天）- 排除已確認無資料的日期
         
         Args:
-            symbol: 期货代码
+            symbol: 期貨代碼
             
         Returns:
-            包含工作日缺口统计的字典
+            包含工作日缺口統計的字典
         """
         import datetime
         
         symbol = self.get_actual_code(symbol)
         
+        confirmed_no_data = self.get_confirmed_no_data_dates(symbol)
+        
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute("""
                 SELECT DISTINCT DATE(datetime(ts, 'unixepoch')) as trade_date
                 FROM kbars
-                WHERE symbol = ?
+                WHERE symbol = ? AND trade_date IS NOT NULL
                 ORDER BY trade_date
             """, (symbol,))
-            existing_dates = [row[0] for row in cursor.fetchall()]
+            existing_dates = [row[0] for row in cursor.fetchall() if row[0]]
         
         if not existing_dates:
             return {"days_checked": 0, "workday_gaps": 0, "weekend_gaps": 0}
         
-        # 分析日期间隔
+        # 分析日期間隔
         from datetime import datetime, timedelta
         
         dates = [datetime.strptime(d, "%Y-%m-%d") for d in existing_dates]
@@ -325,57 +339,68 @@ class KBarSQLite:
             gap_days = (dates[i+1] - dates[i]).days
             
             if gap_days > 1:
-                # 有间隔，检查每一天
+                # 有間隔，檢查每一天
                 for j in range(1, gap_days):
                     check_date = dates[i] + timedelta(days=j)
-                    if check_date.weekday() < 5:  # 周一~周五
-                        workday_gaps.append(check_date.strftime("%Y-%m-%d"))
-                    else:  # 周六、周日
-                        weekend_gaps.append(check_date.strftime("%Y-%m-%d"))
+                    check_date_str = check_date.strftime("%Y-%m-%d")
+                    # 跳過已確認無資料的日期
+                    if check_date_str in confirmed_no_data:
+                        continue
+                    if check_date.weekday() < 5:  # 週一~週五
+                        workday_gaps.append(check_date_str)
+                    else:  # 週六、週日
+                        weekend_gaps.append(check_date_str)
         
         return {
             "days_checked": len(existing_dates),
             "workday_gaps": len(workday_gaps),
             "weekend_gaps": len(weekend_gaps),
-            "workday_gap_dates": workday_gaps[:10],  # 最多显示10个
+            "workday_gap_dates": workday_gaps[:10],
+            "confirmed_no_data": len(confirmed_no_data),
         }
     
     def check_trading_hours_completeness(self, symbol: str) -> dict:
-        """检查交易时段数据完整性（08:46 ~ 23:59）
+        """檢查交易時段數據完整性（08:46 ~ 23:59）- 排除已確認無資料的日期
         
         Args:
-            symbol: 期货代码
+            symbol: 期貨代碼
             
         Returns:
-            包含交易时段完整性统计的字典
+            包含交易時段完整性統計的字典
         """
         import datetime
         
         symbol = self.get_actual_code(symbol)
         
+        confirmed_no_data = self.get_confirmed_no_data_dates(symbol)
+        confirmed_with_data = self.get_confirmed_with_data_dates(symbol)
+        confirmed_all = confirmed_no_data | confirmed_with_data
+        
         with sqlite3.connect(self.db_path) as conn:
-            # 获取每天 08:46:00 ~ 23:59:59 的数据笔数
             cursor = conn.execute("""
                 SELECT 
                     DATE(datetime(ts, 'unixepoch')) as trade_date,
                     COUNT(*) as count
                 FROM kbars
                 WHERE symbol = ?
+                AND DATE(datetime(ts, 'unixepoch')) IS NOT NULL
                 AND TIME(datetime(ts, 'unixepoch')) >= '08:46:00'
                 AND TIME(datetime(ts, 'unixepoch')) <= '23:59:59'
                 GROUP BY DATE(datetime(ts, 'unixepoch'))
                 ORDER BY trade_date
             """, (symbol,))
-            daily_counts = {row[0]: row[1] for row in cursor.fetchall()}
+            daily_counts = {row[0]: row[1] for row in cursor.fetchall() if row[0]}
+        
+        # 排除已確認的日期（無論成功或失敗）
+        for confirmed_date in confirmed_all:
+            daily_counts.pop(confirmed_date, None)
         
         if not daily_counts:
             return {"days_checked": 0, "avg_count": 0, "suspicious_days": 0}
         
-        # 计算平均笔数
         counts = list(daily_counts.values())
         avg_count = sum(counts) / len(counts)
         
-        # 检查异常（低于平均的95%）
         threshold = avg_count * 0.95
         suspicious = []
         
@@ -392,8 +417,108 @@ class KBarSQLite:
             "days_checked": len(daily_counts),
             "avg_count": round(avg_count, 0),
             "suspicious_days": len(suspicious),
-            "suspicious_details": suspicious[:10],  # 最多显示10个
+            "suspicious_details": suspicious[:10],
+            "confirmed_no_data": len(confirmed_no_data),
+            "confirmed_with_data": len(confirmed_with_data),
         }
+    
+    def log_fetch_attempt(self, symbol: str, check_date: str, records_fetched: int, status: str) -> None:
+        """記錄補抓結果
+        
+        Args:
+            symbol: 期貨代碼
+            check_date: 檢查的日期 (YYYY-MM-DD)
+            records_fetched: 取得的資料筆數
+            status: 'success' | 'no_data' | 'error'
+        """
+        symbol = self.get_actual_code(symbol)
+        
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("""
+                INSERT OR REPLACE INTO fetch_log 
+                (symbol, check_date, records_fetched, status, checked_at)
+                VALUES (?, ?, ?, ?, datetime('now'))
+            """, (symbol, check_date, records_fetched, status))
+            conn.commit()
+        
+        logger.info(f"記錄補抓結果: {symbol} {check_date} - {status} ({records_fetched} 筆)")
+    
+    def get_confirmed_no_data_dates(self, symbol: str) -> set:
+        """獲取已確認無資料的日期
+        
+        Args:
+            symbol: 期貨代碼
+            
+        Returns:
+            已確認無資料的日期集合
+        """
+        symbol = self.get_actual_code(symbol)
+        
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute("""
+                SELECT check_date FROM fetch_log
+                WHERE symbol = ? AND status = 'no_data'
+            """, (symbol,))
+            return {row[0] for row in cursor.fetchall()}
+    
+    def get_confirmed_with_data_dates(self, symbol: str) -> set:
+        """獲取已確認有資料的日期
+        
+        Args:
+            symbol: 期貨代碼
+            
+        Returns:
+            已確認有資料的日期集合
+        """
+        symbol = self.get_actual_code(symbol)
+        
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute("""
+                SELECT check_date FROM fetch_log
+                WHERE symbol = ? AND status = 'success'
+            """, (symbol,))
+            return {row[0] for row in cursor.fetchall()}
+    
+    def get_confirmed_dates(self, symbol: str) -> set:
+        """獲取所有已確認的日期（不論成功或失敗）
+        
+        Args:
+            symbol: 期貨代碼
+            
+        Returns:
+            所有已確認的日期集合
+        """
+        symbol = self.get_actual_code(symbol)
+        
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute("""
+                SELECT check_date FROM fetch_log
+                WHERE symbol = ?
+            """, (symbol,))
+            return {row[0] for row in cursor.fetchall()}
+    
+    def get_confirmed_no_data_dates_by_range(self, symbol: str, start_date: str, end_date: str) -> set:
+        """獲取指定範圍內已確認無資料的日期
+        
+        Args:
+            symbol: 期貨代碼
+            start_date: 開始日期 (YYYY-MM-DD)
+            end_date: 結束日期 (YYYY-MM-DD)
+            
+        Returns:
+            已確認無資料的日期集合
+        """
+        symbol = self.get_actual_code(symbol)
+        
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute("""
+                SELECT check_date FROM fetch_log
+                WHERE symbol = ? 
+                AND status = 'no_data'
+                AND check_date >= ? 
+                AND check_date < ?
+            """, (symbol, start_date, end_date))
+            return {row[0] for row in cursor.fetchall()}
     
     def get_today_count(self, symbol: str) -> int:
         """获取今日写入的 K 棒数量（指定 symbol）

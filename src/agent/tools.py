@@ -2269,12 +2269,30 @@ set_goal {strategy_id} <目標金額> <單位>
             for symbol in symbols:
                 count = self.api.kbar_db.get_count(symbol)
                 
+                # 获取最新日期
+                latest = self.api.kbar_db.get_latest_kbar(symbol)
+                latest_date = None
+                if latest:
+                    ts = latest.get('ts', 0)
+                    if isinstance(ts, (int, float)) and ts > 1e12:
+                        ts_sec = ts // 1_000_000_000
+                    else:
+                        ts_sec = int(ts)
+                    from datetime import datetime
+                    latest_date = datetime.fromtimestamp(ts_sec).strftime("%Y-%m-%d")
+                
                 # 检查完整性
                 workday_check = self.api.kbar_db.check_workday_gaps(symbol)
                 trading_hours_check = self.api.kbar_db.check_trading_hours_completeness(symbol)
                 
+                # 计算总天数（使用交易时段平均笔数）
+                avg_count = trading_hours_check.get("avg_count", 830)
+                total_days = round(count / avg_count) if avg_count > 0 else 0
+                
                 sqlite_data[symbol] = {
                     "count": count,
+                    "total_days": total_days,
+                    "latest_date": latest_date,
                     "workday_gaps": workday_check.get("workday_gaps", 0),
                     "weekend_gaps": workday_check.get("weekend_gaps", 0),
                     "trading_hours_suspicious": trading_hours_check.get("suspicious_days", 0),

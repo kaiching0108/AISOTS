@@ -1,4 +1,5 @@
 """連線管理與斷線處理"""
+import asyncio
 import time
 from typing import Callable, Optional
 
@@ -14,8 +15,8 @@ class ConnectionManager:
         # 同步 ShioajiClient 的 connected 狀態，避免初始化時狀態不一致
         self.is_connected = getattr(shioaji_client, 'connected', False)
         self.reconnect_count = 0
-        self.max_reconnect = 50
-        self.reconnect_interval = 5  # 秒
+        self.max_reconnect = config.get('reconnect', {}).get('max_reconnect', 50)
+        self.reconnect_interval = config.get('reconnect', {}).get('reconnect_interval', 5)
         self.heartbeat_interval = 30  # 秒
         
         # 回調
@@ -23,11 +24,25 @@ class ConnectionManager:
         self.on_disconnected: Optional[Callable] = None
         self.on_reconnected: Optional[Callable] = None
     
+    @property
+    def max_reconnect(self) -> int:
+        """取得最大重連次數"""
+        return self._max_reconnect
+    
+    @max_reconnect.setter
+    def max_reconnect(self, value: int):
+        """設置最大重連次數"""
+        self._max_reconnect = value
+    
+    def set_connection_status(self, status: bool) -> None:
+        """設置連線狀態（供測試使用）"""
+        self.is_connected = status
+    
     def setup_event_handlers(self) -> None:
         """設置連線事件處理"""
         @self.client.api.quote.on_event
         def on_event(resp_code: int, event_code: int, info: str, event: str):
-            logger.info(f"Shioaji 事件: {event} (code: {event_code})")
+            logger.info(f"Shioaji 事件：{event} (code: {event_code})")
             
             if event_code == 0:  # UP_NOTICE - 連線建立
                 self.is_connected = True
@@ -44,11 +59,11 @@ class ConnectionManager:
                 self.handle_disconnect()
                 
             elif event_code == 2:  # CONNECT_FAILED - 連線失敗
-                logger.error(f"連線失敗: {info}")
+                logger.error(f"連線失敗：{info}")
                 self.is_connected = False
     
-    def handle_disconnect(self) -> bool:
-        """處理斷線，嘗試重新連線"""
+    async def handle_disconnect_async(self) -> bool:
+        """處理斷線，嘗試重新連線（異步版本）"""
         logger.warning(f"正在嘗試重新連線 ({self.reconnect_count + 1}/{self.max_reconnect})...")
         
         while self.reconnect_count < self.max_reconnect:
@@ -61,15 +76,28 @@ class ConnectionManager:
                     if self.on_reconnected:
                         self.on_reconnected()
                     return True
+                else:
+                    logger.error("重新連線失敗：登入返回 False")
                     
             except Exception as e:
-                logger.error(f"重新連線失敗: {e}")
+                logger.error(f"重新連線失敗：{e}")
             
             self.reconnect_count += 1
-            time.sleep(self.reconnect_interval)
+            
+            # 檢查是否超過最大重連次數
+            if self.reconnect_count >= self.max_reconnect:
+                break
+            
+            logger.warning(f"重連失敗，{self.reconnect_interval}秒後重試...")
+            await asyncio.sleep(self.reconnect_interval)
         
         logger.error("重新連線失敗次數過多，停止嘗試")
         return False
+    
+    def handle_disconnect(self) -> bool:
+        """處理斷線，嘗試重新連線（同步包裝）"""
+        loop = asyncio.get_event_loop()
+        return loop.run_until_complete(self.handle_disconnect_async())
     
     def check_connection(self) -> bool:
         """檢查連線狀態"""
@@ -80,7 +108,7 @@ class ConnectionManager:
                 self.is_connected = True
                 return True
         except Exception as e:
-            logger.warning(f"連線檢查失敗: {e}")
+            logger.warning(f"連線檢查失敗：{e}")
         
         self.is_connected = False
         return False
