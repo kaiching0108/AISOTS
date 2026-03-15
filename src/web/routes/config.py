@@ -61,6 +61,7 @@ def get_config():
             },
             "trading": {
                 "check_interval": config.get("trading", {}).get("check_interval", 60),
+                "stale_order_timeout": config.get("trading", {}).get("stale_order_timeout", 300),
                 "trading_hours": config.get("trading", {}).get("trading_hours", {}),
             },
             "web": {
@@ -163,6 +164,8 @@ def update_config():
             current = config.get("trading", {})
             if "check_interval" in trading_data:
                 current["check_interval"] = trading_data["check_interval"]
+            if "stale_order_timeout" in trading_data:
+                current["stale_order_timeout"] = trading_data["stale_order_timeout"]
             if "trading_hours" in trading_data:
                 current["trading_hours"] = trading_data["trading_hours"]
             config["trading"] = current

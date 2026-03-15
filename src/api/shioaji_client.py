@@ -30,7 +30,7 @@ class ShioajiClient:
         """獲取指定 timeframe 的價格波動率"""
         return cls.TIMEFRAME_VOLATILITY.get(timeframe.lower(), 0.003)
     
-    def __init__(self, api_key: str, secret_key: str, simulation: bool = True, skip_login: bool = False):
+    def __init__(self, api_key: str, secret_key: str, simulation: bool = True, skip_login: bool = False, config: Optional[Dict] = None):
         self.api_key = api_key
         self.secret_key = secret_key
         self.simulation = simulation
@@ -53,10 +53,19 @@ class ShioajiClient:
         # K 棒 SQLite 存儲
         workspace = Path(__file__).parent.parent.parent / 'workspace'
         db_path = workspace / 'kbars.sqlite'
-        self.kbar_db = KBarSQLite(db_path)
+        
+        # 从配置中读取 storage 设置
+        storage_config = config.get('data_update', {}).get('storage', {}) if config else {}
+        max_records = storage_config.get('max_records')
+        cleanup_threshold = storage_config.get('cleanup_threshold')
+        
+        self.kbar_db = KBarSQLite(db_path, max_records=max_records, cleanup_threshold=cleanup_threshold)
         
         # 追蹤已訂閱的 symbol（用於重連後重新訂閱）
         self._subscribed_symbols: set = set()
+        
+        # 最新價格快取（用於取得即時價格）
+        self._latest_prices: Dict[str, float] = {}
     
     def set_strategy_runner(self, runner):
         """設置策略運行器參考（用於模擬模式下獲取動態價格）"""
@@ -609,8 +618,9 @@ class ShioajiClient:
         price_type: str = "MKT",
         order_type: str = "ROD",
         octype: str = "Auto",
-        timeout: int = 0,
-        callback=None
+        timeout: int = 5000,  # 預設 5000 毫秒（5 秒），等待 Shioaji 分配 seqno
+        callback=None,
+        on_seqno_assigned=None  # 可選回調：當獲取到 seqno 時立即調用
     ) -> Optional[Any]:
         """下單"""
         if not self.connected:
@@ -691,7 +701,7 @@ class ShioajiClient:
                 account=self.futopt_account
             )
             
-            # 非阻塞下單
+            # 阻塞下單（timeout 單位：毫秒）
             trade = self.api.place_order(
                 contract,
                 order,
@@ -699,7 +709,15 @@ class ShioajiClient:
                 cb=callback
             )
             
-            logger.info(f"下單成功: {symbol} {action} {quantity} @ {price}")
+            # 獲取 seqno 並立即調用回調函數（如果提供）
+            seqno = None
+            if hasattr(trade, 'order') and hasattr(trade.order, 'seqno'):
+                seqno = trade.order.seqno
+                logger.debug(f"獲取到 seqno: {seqno}")
+                if on_seqno_assigned and seqno:
+                    on_seqno_assigned(seqno)
+            
+            logger.info(f"下單成功：{symbol} {action} {quantity} @ {price}")
             return trade
             
         except Exception as e:
@@ -790,9 +808,10 @@ class ShioajiClient:
     
     def subscribe_quote(self, symbol: str, quote_type: str = "tick") -> bool:
         """訂閱報價"""
-        # 模擬模式：跳過報價訂閱
-        if self.simulation or self.skip_login:
-            logger.debug(f"模擬模式跳過報價訂閱：{symbol}")
+        # 只有完全模擬模式（skip_login）才跳過報價訂閱
+        # simulation: true 時仍需訂閱報價以獲取實盤價格，只是下單時下虛擬單
+        if self.skip_login:
+            logger.debug(f"完全模擬模式跳過報價訂閱：{symbol}")
             return True
         
         if not self.connected:
@@ -805,7 +824,7 @@ class ShioajiClient:
         try:
             self.api.quote.subscribe(
                 contract,
-                quote_type=sj.constant.QuoteType[quote_type.upper()],
+                quote_type=quote_type,
                 version=sj.constant.QuoteVersion.v1
             )
             # 追蹤已訂閱的 symbol
@@ -815,27 +834,13 @@ class ShioajiClient:
         except Exception as e:
             logger.error(f"訂閱報價失敗：{e}")
             return False
-        
-        contract = self.get_contract(symbol)
-        if not contract:
-            return False
-        
-        try:
-            self.api.quote.subscribe(
-                contract,
-                quote_type=sj.constant.QuoteType[quote_type.upper()],
-                version=sj.constant.QuoteVersion.v1
-            )
-            return True
-        except Exception as e:
-            logger.error(f"訂閱報價失敗: {e}")
-            return False
     
     def unsubscribe_quote(self, symbol: str, quote_type: str = "tick") -> bool:
         """取消訂閱報價"""
-        # 模擬模式：跳過報價取消訂閱
-        if self.simulation or self.skip_login:
-            logger.debug(f"模擬模式跳過取消報價訂閱: {symbol}")
+        # 只有完全模擬模式（skip_login）才跳過報價取消訂閱
+        # simulation: true 時仍需取消訂閱報價
+        if self.skip_login:
+            logger.debug(f"完全模擬模式跳過取消報價訂閱: {symbol}")
             return True
         
         if not self.connected:
@@ -887,3 +892,24 @@ class ShioajiClient:
         except Exception as e:
             logger.error(f"取得流量失敗：{e}")
             return None
+    
+    def update_latest_price(self, symbol: str, price: float) -> None:
+        """更新最新價格快取
+        
+        Args:
+            symbol: 期貨代碼（如 TMF、TXF）
+            price: 最新價格
+        """
+        if price and price > 0:
+            self._latest_prices[symbol] = price
+    
+    def get_latest_price(self, symbol: str) -> Optional[float]:
+        """取得最新價格
+        
+        Args:
+            symbol: 期貨代碼（如 TMF、TXF）
+            
+        Returns:
+            最新價格，如果不存在則返回 None
+        """
+        return self._latest_prices.get(symbol)

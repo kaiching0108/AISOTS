@@ -13,15 +13,18 @@ class RealtimeKBarAggregator:
     
     将 tick 数据聚合成 1 分钟 K-bar，
     并支持转换为其他时间周期。
+    支持将完成的 K-bar 写入 SQLite（仅实盘模式）。
     """
     
-    def __init__(self, on_kbar_callback=None):
+    def __init__(self, on_kbar_callback=None, kbar_db=None):
         """初始化聚合器
         
         Args:
             on_kbar_callback: K-bar 生成后的回调函数 (symbol, kbar_data)
+            kbar_db: KBarSQLite 实例，用于写入完成的 K-bar
         """
         self.on_kbar_callback = on_kbar_callback
+        self._kbar_db = kbar_db
         
         # 存储当前的 K-bar 数据
         # key: symbol, value: dict with 'open', 'high', 'low', 'close', 'volume', 'start_ts'
@@ -29,6 +32,15 @@ class RealtimeKBarAggregator:
         
         # 存储已完成的 1m K-bars（用于转换到其他周期）
         self._completed_1m_bars: Dict[str, list] = defaultdict(list)
+    
+    def set_kbar_db(self, kbar_db) -> None:
+        """设置 K-bar 数据库实例
+        
+        Args:
+            kbar_db: KBarSQLite 实例
+        """
+        self._kbar_db = kbar_db
+        logger.info("RealtimeKBarAggregator 已连接 K-bar 数据库")
     
     def _create_kbar_slot(self) -> Dict:
         """创建 K-bar 槽位"""
@@ -97,6 +109,21 @@ class RealtimeKBarAggregator:
         if len(self._completed_1m_bars[symbol]) > 1000:
             self._completed_1m_bars[symbol] = self._completed_1m_bars[symbol][-1000:]
         
+        # 写入 SQLite（仅实盘模式时启用）
+        if self._kbar_db:
+            try:
+                kbars_data = {
+                    'ts': [completed_kbar['ts']],
+                    'open': [completed_kbar['open']],
+                    'high': [completed_kbar['high']],
+                    'low': [completed_kbar['low']],
+                    'close': [completed_kbar['close']],
+                    'volume': [completed_kbar['volume']],
+                }
+                self._kbar_db.insert_kbars(symbol, kbars_data, source='realtime')
+            except Exception as e:
+                logger.error(f"写入 K-bar 到 SQLite 失败: {e}")
+        
         # 重置当前 K-bar
         kbar.clear()
         kbar.update(self._create_kbar_slot())
@@ -162,7 +189,7 @@ class RealtimeKBarAggregator:
         
         minutes = timeframe_minutes[target_timeframe]
         
-        resampled = df.resample(f'{minutes}min', label='left', closed='left').agg({
+        resampled = df.resample(f'{minutes}min', label='right', closed='right').agg({
             'open': 'first',
             'high': 'max',
             'low': 'min',

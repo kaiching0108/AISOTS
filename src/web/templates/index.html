@@ -1,335 +1,891 @@
 {% extends "base.html" %}
 
-{% block title %}系統總覽 - AISOTS{% endblock %}
+{% block title %}儀表板 - AISOTS{% endblock %}
+
+{% block extra_css %}
+<style>
+    .dashboard {
+        display: flex;
+        gap: 20px;
+        height: calc(100vh - 120px);
+    }
+    
+    .sidebar {
+        width: 320px;
+        min-width: 280px;
+        display: flex;
+        flex-direction: column;
+        gap: 15px;
+        overflow-y: auto;
+        padding-right: 5px;
+    }
+    
+    .main-content {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 15px;
+        min-width: 0;
+    }
+    
+    .sidebar-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 15px;
+    }
+    
+    .sidebar-card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 12px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid var(--border-color);
+        cursor: pointer;
+    }
+    
+    .sidebar-card-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--text-primary);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    
+    .status-indicator {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        display: inline-block;
+    }
+    
+    .status-green { background: var(--success); }
+    .status-red { background: var(--danger); }
+    .status-yellow { background: var(--btn-warning); }
+    
+    .stat-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 6px 0;
+        font-size: 13px;
+    }
+    
+    .stat-label {
+        color: var(--text-secondary);
+    }
+    
+    .stat-value {
+        font-weight: 600;
+        color: var(--text-primary);
+    }
+    
+    .pnl-positive { color: var(--success); }
+    .pnl-negative { color: var(--danger); }
+    
+    .position-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 8px 10px;
+        background: var(--bg-secondary);
+        border-radius: 6px;
+        margin-bottom: 8px;
+        font-size: 13px;
+    }
+    
+    .position-info {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    
+    .direction-badge {
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 11px;
+        font-weight: 600;
+    }
+    
+    .direction-long {
+        background: rgba(63, 185, 80, 0.2);
+        color: var(--success);
+    }
+    
+    .direction-short {
+        background: rgba(248, 81, 73, 0.2);
+        color: var(--danger);
+    }
+    
+    .sqlite-collapse {
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+    
+    .sqlite-content {
+        display: none;
+        margin-top: 10px;
+    }
+    
+    .sqlite-content.expanded {
+        display: block;
+    }
+    
+    .sqlite-toggle {
+        font-size: 12px;
+        color: var(--text-secondary);
+        transition: transform 0.2s;
+    }
+    
+    .sqlite-toggle.expanded {
+        transform: rotate(180deg);
+    }
+    
+    .chart-controls {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+        align-items: center;
+    }
+    
+    .chart-controls select {
+        padding: 6px 10px;
+        border-radius: 6px;
+        border: 1px solid var(--border-color);
+        background: var(--bg-input);
+        color: var(--text-primary);
+        font-size: 13px;
+    }
+    
+    .timeframe-buttons {
+        display: flex;
+        gap: 6px;
+    }
+    
+    .timeframe-btn {
+        padding: 5px 12px;
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        background: var(--bg-secondary);
+        color: var(--text-secondary);
+        font-size: 12px;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+    
+    .timeframe-btn:hover {
+        border-color: var(--accent-blue);
+        color: var(--text-primary);
+    }
+    
+    .timeframe-btn.active {
+        background: var(--accent-blue);
+        border-color: var(--accent-blue);
+        color: white;
+    }
+    
+    .chart-container {
+        flex: 1;
+        min-height: 350px;
+        background: var(--bg-primary);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        overflow: hidden;
+    }
+    
+    .chart-legend {
+        display: flex;
+        gap: 20px;
+        padding: 10px 15px;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-top: none;
+        border-radius: 0 0 8px 8px;
+        font-size: 12px;
+    }
+    
+    .legend-item {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+    }
+    
+    .legend-buy { color: #3fb950; }
+    .legend-sell { color: #f85149; }
+    .legend-close { color: #d29922; }
+    
+    .trade-logs-section {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        max-height: 250px;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+    }
+    
+    .trade-logs-header {
+        padding: 12px 15px;
+        border-bottom: 1px solid var(--border-color);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    
+    .trade-logs-title {
+        font-size: 14px;
+        font-weight: 600;
+    }
+    
+    .trade-logs-list {
+        overflow-y: auto;
+        flex: 1;
+    }
+    
+    .log-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 15px;
+        border-bottom: 1px solid var(--border-color);
+        font-size: 12px;
+    }
+    
+    .log-item:hover {
+        background: var(--bg-secondary);
+    }
+    
+    .log-icon {
+        font-size: 14px;
+    }
+    
+    .log-content {
+        flex: 1;
+        min-width: 0;
+    }
+    
+    .log-strategy {
+        font-weight: 500;
+        color: var(--text-primary);
+    }
+    
+    .log-message {
+        color: var(--text-secondary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    
+    .log-time {
+        color: var(--text-muted);
+        font-size: 11px;
+        white-space: nowrap;
+    }
+    
+    .log-badge {
+        padding: 2px 6px;
+        border-radius: 3px;
+        font-size: 10px;
+        font-weight: 500;
+    }
+    
+    .log-badge-success {
+        background: rgba(63, 185, 80, 0.2);
+        color: var(--success);
+    }
+    
+    .log-badge-danger {
+        background: rgba(248, 81, 73, 0.2);
+        color: var(--danger);
+    }
+    
+    .log-badge-warning {
+        background: rgba(210, 153, 34, 0.2);
+        color: var(--btn-warning);
+    }
+    
+    .log-badge-info {
+        background: rgba(88, 166, 255, 0.2);
+        color: var(--accent-blue);
+    }
+    
+    .empty-state {
+        padding: 20px;
+        text-align: center;
+        color: var(--text-muted);
+        font-size: 13px;
+    }
+    
+    .refresh-indicator {
+        font-size: 11px;
+        color: var(--text-muted);
+    }
+    
+    @media (max-width: 1024px) {
+        .dashboard {
+            flex-direction: column;
+            height: auto;
+        }
+        .sidebar {
+            width: 100%;
+            flex-direction: row;
+            flex-wrap: wrap;
+            overflow-y: visible;
+        }
+        .sidebar-card {
+            flex: 1;
+            min-width: 200px;
+        }
+        .main-content {
+            min-height: 600px;
+        }
+    }
+</style>
+{% endblock %}
 
 {% block content %}
-<!-- 系統狀態 + 策略概覽 合併 -->
-<div class="card">
-    <div class="card-header">📊 系統狀態</div>
-    <div>
-        <div id="systemStatus">
-            <div class="loading">載入中...</div>
-        </div>
-    </div>
-</div>
-
-<!-- 部位概覽 + 風控狀態 合併 -->
-<div class="card">
-    <div style="display: flex; gap: 30px; flex-wrap: wrap;">
-        <div style="flex: 1; min-width: 280px; border-right: 1px solid #eee; padding-right: 20px;">
-            <div style="font-weight: bold; margin-bottom: 10px; color: #333;">📦 部位概覽</div>
-            <div id="positionOverview">
-                <div class="loading">載入中...</div>
+<div class="dashboard">
+    <!-- Left Sidebar: System Info -->
+    <div class="sidebar">
+        <!-- Status Card -->
+        <div class="sidebar-card">
+            <div class="sidebar-card-header">
+                <span class="sidebar-card-title">📊 系統狀態</span>
+                <span class="refresh-indicator" id="lastRefresh"></span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">交易時段</span>
+                <span class="stat-value">
+                    <span class="status-indicator" id="tradingStatusDot"></span>
+                    <span id="tradingStatus">載入中...</span>
+                </span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">連線狀態</span>
+                <span class="stat-value">
+                    <span class="status-indicator" id="connStatusDot"></span>
+                    <span id="connStatus">載入中...</span>
+                </span>
             </div>
         </div>
-        <div style="flex: 1; min-width: 250px; padding-left: 10px;">
-            <div style="font-weight: bold; margin-bottom: 10px; color: #333;">🛡️ 風控狀態</div>
-            <div id="riskStatus">
-                <div class="loading">載入中...</div>
+        
+        <!-- PnL Card -->
+        <div class="sidebar-card">
+            <div class="sidebar-card-header">
+                <span class="sidebar-card-title">💰 當日損益</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">總損益</span>
+                <span class="stat-value" id="totalPnl">--</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">已實現</span>
+                <span class="stat-value" id="realizedPnl">--</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">未實現</span>
+                <span class="stat-value" id="unrealizedPnl">--</span>
+            </div>
+        </div>
+        
+        <!-- Positions Card -->
+        <div class="sidebar-card">
+            <div class="sidebar-card-header">
+                <span class="sidebar-card-title">📦 部位概覽</span>
+                <span class="stat-value" id="totalQuantity">0口</span>
+            </div>
+            <div id="positionsList">
+                <div class="empty-state">載入中...</div>
+            </div>
+        </div>
+        
+        <!-- Risk Card -->
+        <div class="sidebar-card">
+            <div class="sidebar-card-header">
+                <span class="sidebar-card-title">🛡️ 風控狀態</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">部位限制</span>
+                <span class="stat-value" id="riskPosition">--</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">下單頻率</span>
+                <span class="stat-value" id="riskOrders">--</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">當日損益</span>
+                <span class="stat-value" id="riskDailyPnl">--</span>
+            </div>
+        </div>
+        
+        <!-- Strategy Card -->
+        <div class="sidebar-card">
+            <div class="sidebar-card-header">
+                <span class="sidebar-card-title">📈 策略狀態</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">啟用</span>
+                <span class="stat-value" id="enabledStrategies">--</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">執行中</span>
+                <span class="stat-value" id="runningStrategies">--</span>
+            </div>
+        </div>
+        
+        <!-- SQLite Card -->
+        <div class="sidebar-card">
+            <div class="sidebar-card-header sqlite-collapse" onclick="toggleSqlite()">
+                <span class="sidebar-card-title">📊 SQLite 數據</span>
+                <span class="sqlite-toggle" id="sqliteToggle">▼</span>
+            </div>
+            <div class="sqlite-content" id="sqliteContent">
+                <div id="sqliteData">
+                    <div class="empty-state">載入中...</div>
+                </div>
+                <button class="btn btn-sm" onclick="fetchMissingData(event)" style="margin-top: 10px; width: 100%;">
+                    🔄 獲取缺失數據
+                </button>
             </div>
         </div>
     </div>
-</div>
-
-<div class="card">
-    <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
-        <span>📜 重要交易訊息</span>
-        <div style="display: flex; gap: 10px; align-items: center;">
-            <select id="logFilter" onchange="loadTradeLogs()" style="padding: 5px 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px;">
-                <option value="">全部類型</option>
-                <option value="ORDER_SUCCESS">下單成功</option>
-                <option value="CLOSE_POSITION">平倉</option>
-                <option value="RISK_BLOCKED">風控擋單</option>
-                <option value="ORDER_FAILED">下單失敗</option>
-            </select>
-            <button onclick="loadTradeLogs()" class="btn btn-sm" style="padding: 5px 12px; font-size: 13px;">
-                🔄 刷新
-            </button>
+    
+    <!-- Right Main: K-line Chart & Logs -->
+    <div class="main-content">
+        <!-- Chart Controls -->
+        <div class="sidebar-card" style="padding: 12px 15px;">
+            <div class="chart-controls">
+                <select id="symbolSelect" onchange="loadChart()">
+                    <option value="TXF">TXF (台指期)</option>
+                    <option value="MXF">MXF (小台指)</option>
+                    <option value="TMF">TMF (微型台指)</option>
+                </select>
+                <select id="strategySelect" onchange="loadChart()">
+                    <option value="">全部訊號</option>
+                </select>
+                <select id="limitSelect" onchange="loadChart()">
+                    <option value="100">100 根</option>
+                    <option value="300" selected>300 根</option>
+                    <option value="500">500 根</option>
+                    <option value="1000">1000 根</option>
+                </select>
+                <button class="btn btn-sm" onclick="loadChart()">🔄</button>
+                
+                <div class="timeframe-buttons" id="timeframeButtons">
+                    <button class="timeframe-btn" data-value="1m">1m</button>
+                    <button class="timeframe-btn" data-value="5m">5m</button>
+                    <button class="timeframe-btn active" data-value="15m">15m</button>
+                    <button class="timeframe-btn" data-value="30m">30m</button>
+                    <button class="timeframe-btn" data-value="60m">60m</button>
+                    <button class="timeframe-btn" data-value="1h">1h</button>
+                    <button class="timeframe-btn" data-value="1d">1d</button>
+                </div>
+            </div>
         </div>
-    </div>
-    <div id="tradeLogs" style="max-height: 400px; overflow-y: auto;">
-        <div class="loading">載入中...</div>
-    </div>
-    <div id="logStats" style="padding: 10px 20px; background: #f8f9fa; border-top: 1px solid #eee; font-size: 12px; color: #666;">
-        統計載入中...
+        
+        <!-- Chart -->
+        <div class="chart-container" id="chartContainer"></div>
+        
+        <!-- Chart Legend -->
+        <div class="chart-legend">
+            <span id="chartInfo" style="color: var(--text-secondary);">載入中...</span>
+            <div style="flex: 1;"></div>
+            <div class="legend-item legend-buy">▲ 買入</div>
+            <div class="legend-item legend-sell">▼ 賣出</div>
+            <div class="legend-item legend-close">● 平倉</div>
+        </div>
+        
+        <!-- Trade Logs -->
+        <div class="trade-logs-section">
+            <div class="trade-logs-header">
+                <span class="trade-logs-title">📜 交易日誌 (最近10筆)</span>
+                <button class="btn btn-sm" onclick="loadTradeLogs()">🔄</button>
+            </div>
+            <div class="trade-logs-list" id="tradeLogsList">
+                <div class="empty-state">載入中...</div>
+            </div>
+        </div>
     </div>
 </div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
-    async function loadSystemStatus() {
-        try {
-            const [statusRes, strategiesRes, positionsRes, riskRes, perfRes] = await Promise.all([
-                fetch('/api/status'),
-                fetch('/api/strategies'),
-                fetch('/api/positions'),
-                fetch('/api/risk'),
-                fetch('/api/performance?period=today')
-            ]);
-            
-            const statusData = await statusRes.json();
-            const strategiesData = await strategiesRes.json();
-            const positionsData = await positionsRes.json();
-            const riskData = await riskRes.json();
-            const perfData = await perfRes.json();
-            
-            // System Status + Strategy Overview Combined
-            const enabled = strategiesData.data?.filter(s => s.enabled).length || 0;
-            const total = strategiesData.count || 0;
-            const running = strategiesData.data?.filter(s => s.is_running).length || 0;
-            const pnl = perfData.success ? perfData.total_pnl : (positionsData.summary?.total_pnl || 0);
-            const pnlClass = pnl >= 0 ? 'color: #27ae60;' : 'color: #e74c3c;';
-            
-            const connStatus = statusData.connection?.status || 'disconnected';
-            const connIcon = connStatus === 'connected' ? '✅' : '❌';
-            const connText = connStatus === 'connected' ? '連線正常' : '連線中斷';
-            const connClass = connStatus === 'connected' ? 'status-dot-green' : 'status-dot-red';
-            
-            document.getElementById('systemStatus').innerHTML = `
-                <div style="display: flex; gap: 30px; flex-wrap: wrap;">
-                    <div style="flex: 1; min-width: 250px;">
-                        <div style="display: flex; gap: 15px; flex-wrap: wrap; justify-content: center;">
-                            <div style="text-align: center;">
-                                <div style="font-size: 20px; font-weight: bold;"><span class="status-dot ${connClass}"></span> ${connIcon} ${connText}</div>
-                                <div style="color: #666; font-size: 11px;">${statusData.connection?.reconnect_count !== undefined ? `重連：${statusData.connection.reconnect_count} 次` : '系統連線'}</div>
-                            </div>
-                            <div style="text-align: center;">
-                                <div style="font-size: 20px; font-weight: bold;">${total}</div>
-                                <div style="color: #666; font-size: 11px;">策略總數</div>
-                            </div>
-                            <div style="text-align: center;">
-                                <div style="font-size: 20px; font-weight: bold;">${enabled}</div>
-                                <div style="color: #666; font-size: 11px;">啟用</div>
-                            </div>
-                            <div style="text-align: center;">
-                                <div style="font-size: 20px; font-weight: bold;">${running}</div>
-                                <div style="color: #666; font-size: 11px;">執行中</div>
-                            </div>
-                            <div style="text-align: center;">
-                                <div style="font-size: 20px; font-weight: bold;">${positionsData.summary?.total_quantity || 0}</div>
-                                <div style="color: #666; font-size: 11px;">部口數</div>
-                            </div>
-                            <div style="text-align: center;">
-                                <div style="font-size: 20px; font-weight: bold; ${pnlClass}">${pnl >= 0 ? '+' : ''}${pnl.toLocaleString()}</div>
-                                <div style="color: #666; font-size: 11px;">當日損益</div>
-                                ${perfData.success && perfData.realized_pnl !== undefined ? `
-                                <div style="font-size: 10px; color: #999; margin-top: 2px;">
-                                    已實現: ${perfData.realized_pnl?.toLocaleString() ?? 0} | 未實現: ${perfData.unrealized_pnl?.toLocaleString() ?? 0}
-                                </div>
-                                ` : ''}
-                            </div>
-                        </div>
-                    </div>
-                    <div style="flex: 1; min-width: 220px; border-left: 1px solid #eee; padding-left: 20px;">
-                        <div style="font-weight: bold; margin-bottom: 10px; color: #333;">💾 SQLite 數據</div>
-                        {% raw %}
-                                ${statusData.sqlite_error ? `
-                                    <div style="color: #e74c3c; font-size: 12px;">${statusData.sqlite_error}</div>
-                                ` : `
-                                    <div>
-                                        ${Object.entries(statusData.sqlite || {}).map(([symbol, data]) => {
-                                            const count = typeof data === 'number' ? data : (data?.count || 0);
-                                            const totalDays = typeof data === 'object' ? (data?.total_days || 0) : 0;
-                                            const latestDate = typeof data === 'object' ? (data?.latest_date || '-') : '-';
-                                            const workdayGaps = typeof data === 'object' ? (data?.workday_gaps || 0) : 0;
-                                            const tradingSuspicious = typeof data === 'object' ? (data?.trading_hours_suspicious || 0) : 0;
-                                            const hasIssues = workdayGaps > 0 || tradingSuspicious > 0;
-                                            return `
-                                                <div style="margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid #f0f0f0;">
-                                                    <div style="display: flex; justify-content: space-between; font-size: 13px;">
-                                                        <span>${hasIssues ? '⚠️' : '✅'} ${symbol}</span>
-                                                        <span>${Number(count).toLocaleString()} 筆</span>
-                                                    </div>
-                                                    <div style="font-size: 11px; color: #666; margin-top: 4px;">
-                                                        <div>📅 ${totalDays} 天 | 最新: ${latestDate}</div>
-                                                    </div>
-                                                    <div style="font-size: 11px; color: #888; margin-top: 2px;">
-                                                        <div>工作日缺口: ${workdayGaps} 天</div>
-                                                        <div>交易時段異常: ${tradingSuspicious} 天</div>
-                                                    </div>
-                                                </div>
-                                            `;
-                                        }).join('')}
-                                        <div style="border-top: 1px solid #eee; margin-top: 8px; padding-top: 8px; font-weight: bold; font-size: 13px;">
-                                            總計：${Number(statusData.total || 0).toLocaleString()} 筆
-                                        </div>
-                                        <button id="fetchMissingBtn" onclick="fetchMissingData()" 
-                                            style="margin-top: 10px; padding: 6px 12px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">
-                                            🔄 獲取缺失數據
-                                        </button>
-                                    </div>
-                                `}
-                        {% endraw %}
-                    </div>
-                </div>
-            `;
-            
-            // Position Overview
-            const positions = positionsData.data || [];
-            if (positions.length === 0) {
-                document.getElementById('positionOverview').innerHTML = '<div class="empty-state" style="padding: 20px;">目前無部位</div>';
-            } else {
-                document.getElementById('positionOverview').innerHTML = positions.map(p => `
-                    <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee;">
-                        <div>
-                            <strong>${p.symbol}</strong> ${p.direction} ${p.quantity}口
-                            <span style="color: #666; font-size: 12px;">@ ${p.entry_price}</span>
-                        </div>
-                        <div class="${p.pnl >= 0 ? 'pnl-positive' : 'pnl-negative'}" style="font-weight: bold;">
-                            ${p.pnl >= 0 ? '+' : ''}${p.pnl.toLocaleString()}
-                        </div>
-                    </div>
-                `).join('');
-            }
-            
-            // Risk Status
-            const risk = riskData.data || {};
-            document.getElementById('riskStatus').innerHTML = `
-                <div style="display: flex; gap: 20px; flex-wrap: wrap; justify-content: center;">
-                    <div style="text-align: center;">
-                        <div style="font-weight: bold;">${risk.daily_pnl?.toLocaleString() || 0}</div>
-                        <div style="color: #666; font-size: 11px;">當日損益</div>
-                    </div>
-                    <div style="text-align: center;">
-                        <div style="font-weight: bold;">${risk.current_position || 0} / ${risk.max_position || 0}</div>
-                        <div style="color: #666; font-size: 11px;">部位限制</div>
-                    </div>
-                    <div style="text-align: center;">
-                        <div style="font-weight: bold;">${risk.orders_this_minute || 0} / ${risk.max_orders_per_minute || 0}</div>
-                        <div style="color: #666; font-size: 11px;">下單頻率</div>
-                    </div>
-                </div>
-            `;
-        } catch (e) {
-            console.error('Error loading system status:', e);
-            document.getElementById('systemStatus').innerHTML = '<div class="empty-state">載入失敗: ' + e.message + '</div>';
-            document.getElementById('positionOverview').innerHTML = '<div class="empty-state">載入失敗</div>';
-            document.getElementById('riskStatus').innerHTML = '<div class="empty-state">載入失敗</div>';
-        }
+let chart, candlestickSeries, volumeSeries;
+let currentTimeframe = '15m';
+let cachedStatusData = null;
+
+function initChart() {
+    const container = document.getElementById('chartContainer');
+    
+    if (typeof LightweightCharts === 'undefined') {
+        console.error('LightweightCharts not loaded');
+        container.innerHTML = '<div class="empty-state">圖表庫載入失敗，請刷新頁面</div>';
+        return;
     }
     
-    // 獲取缺失數據
-    async function fetchMissingData() {
-        const btn = document.getElementById('fetchMissingBtn');
-        btn.disabled = true;
-        btn.textContent = '🔄 獲取中...';
+    chart = LightweightCharts.createChart(container, {
+        width: container.clientWidth,
+        height: 350,
+        layout: {
+            background: { type: 'solid', color: '#0d1117' },
+            textColor: '#8b949e',
+        },
+        grid: {
+            vertLines: { color: '#21262d' },
+            horzLines: { color: '#21262d' },
+        },
+        crosshair: {
+            mode: LightweightCharts.CrosshairMode.Normal,
+            vertLine: { color: '#58a6ff', width: 1, style: LightweightCharts.LineStyle.Dashed },
+            horzLine: { color: '#58a6ff', width: 1, style: LightweightCharts.LineStyle.Dashed },
+        },
+        rightPriceScale: { borderColor: '#30363d' },
+        timeScale: { borderColor: '#30363d', timeVisible: true, secondsVisible: false },
+    });
+    
+    candlestickSeries = chart.addCandlestickSeries({
+        upColor: '#3fb950',
+        downColor: '#f85149',
+        borderUpColor: '#3fb950',
+        borderDownColor: '#f85149',
+        wickUpColor: '#3fb950',
+        wickDownColor: '#f85149',
+    });
+    
+    volumeSeries = chart.addHistogramSeries({
+        color: '#26a69a',
+        priceFormat: { type: 'volume' },
+        priceScaleId: '',
+    });
+    volumeSeries.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
+    
+    window.addEventListener('resize', () => {
+        chart.resize(container.clientWidth, 350);
+    });
+    
+    document.querySelectorAll('.timeframe-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            document.querySelectorAll('.timeframe-btn').forEach(b => b.classList.remove('active'));
+            this.classList.add('active');
+            currentTimeframe = this.dataset.value;
+            loadChart();
+        });
+    });
+}
+
+async function loadChart() {
+    if (!chart || !candlestickSeries) return;
+    
+    const symbol = document.getElementById('symbolSelect').value;
+    const strategyId = document.getElementById('strategySelect').value;
+    const limit = document.getElementById('limitSelect').value;
+    
+    document.getElementById('chartInfo').textContent = '載入中...';
+    
+    try {
+        const url = `/api/chart/kbars?symbol=${symbol}&timeframe=${currentTimeframe}&limit=${limit}`;
+        const res = await apiCall(url);
         
-        try {
-            const response = await fetch('/api/sqlite/fetch-missing', { method: 'POST' });
-            const data = await response.json();
-            
-            if (data.success) {
-                alert('✅ 獲取完成！共獲取 ' + data.result.total_fetched + ' 筆數據');
-                loadSystemStatus();
-            } else {
-                alert('❌ 獲取失敗：' + (data.error || '未知錯誤'));
-            }
-        } catch (e) {
-            alert('❌ 請求失敗：' + e.message);
-        } finally {
-            btn.disabled = false;
-            btn.textContent = '🔄 獲取缺失數據';
+        if (!res.success || !res.data?.candlestick?.length) {
+            document.getElementById('chartInfo').textContent = '無資料';
+            candlestickSeries.setData([]);
+            volumeSeries.setData([]);
+            return;
         }
-    }
-    
-    // 載入交易日誌
-    async function loadTradeLogs() {
-        try {
-            const filterType = document.getElementById('logFilter')?.value || '';
-            const url = filterType 
-                ? '/api/trade-logs?limit=50&event_type=' + filterType
-                : '/api/trade-logs?limit=50';
-            
-            const [logsRes, statsRes] = await Promise.all([
-                fetch(url),
-                fetch('/api/trade-logs/stats')
-            ]);
-            
-            const logsData = await logsRes.json();
-            const statsData = await statsRes.json();
-            
-            if (!logsData.success) {
-                throw new Error(logsData.error || '載入失敗');
+        
+        candlestickSeries.setData(res.data.candlestick);
+        
+        const volData = res.data.volume.map(v => ({
+            time: v.time,
+            value: v.value,
+            color: v.close >= v.open ? 'rgba(63, 185, 80, 0.5)' : 'rgba(248, 81, 73, 0.5)'
+        }));
+        volumeSeries.setData(volData);
+        
+        document.getElementById('chartInfo').textContent = `${symbol} | ${currentTimeframe} | ${res.data.candlestick.length} 根`;
+        
+        if (strategyId) {
+            const signalsRes = await apiCall(`/api/chart/signals?strategy_id=${strategyId}`);
+            if (signalsRes.success && signalsRes.data?.markers) {
+                candlestickSeries.setMarkers(signalsRes.data.markers);
             }
-            
-            // 顯示日誌
-            const logsContainer = document.getElementById('tradeLogs');
-            const logs = logsData.data || [];
-            
-            if (logs.length === 0) {
-                logsContainer.innerHTML = '<div class="empty-state">目前無交易日誌</div>';
-            } else {
-                logsContainer.innerHTML = logs.map(function(log) {
-                    const typeClass = getLogTypeClass(log.event_type);
-                    const icon = getLogTypeIcon(log.event_type);
-                    const pnlDisplay = log.details && log.details.pnl !== undefined 
-                        ? '<div style="margin-top: 4px; font-size: 13px; font-weight: bold; color: ' + (log.details.pnl >= 0 ? '#27ae60' : '#e74c3c') + ';">損益: ' + (log.details.pnl >= 0 ? '+' : '') + log.details.pnl.toLocaleString() + '</div>'
-                        : '';
-                    
-                    return '<div style="padding: 10px 20px; border-bottom: 1px solid #eee; display: flex; align-items: center; gap: 12px;">' +
-                        '<span style="font-size: 16px;">' + icon + '</span>' +
-                        '<div style="flex: 1;">' +
-                            '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">' +
-                                '<span style="font-weight: 500; color: #2c3e50;">' + (log.strategy_name || log.strategy_id) + ' <span style="color: #999; font-size: 11px;">(' + log.strategy_id + ')</span></span>' +
-                                '<span style="font-size: 12px; color: #999;">' + log.formatted_time + '</span>' +
-                            '</div>' +
-                            '<div style="font-size: 14px; color: #666; line-height: 1.4;">' + log.message + '</div>' +
-                            pnlDisplay +
-                        '</div>' +
-                        '<span class="badge ' + typeClass + '" style="font-size: 11px; padding: 3px 8px;">' + log.event_type_display + '</span>' +
-                    '</div>';
-                }).join('');
+        } else {
+            const strategiesRes = await apiCall('/api/chart/strategies');
+            if (strategiesRes.success && strategiesRes.data) {
+                const enabledIds = strategiesRes.data.filter(s => s.enabled).map(s => s.id);
+                let allMarkers = [];
+                for (const sid of enabledIds) {
+                    const sr = await apiCall(`/api/chart/signals?strategy_id=${sid}`);
+                    if (sr.success && sr.data?.markers) {
+                        allMarkers = allMarkers.concat(sr.data.markers);
+                    }
+                }
+                candlestickSeries.setMarkers(allMarkers);
             }
-            
-            // 顯示統計
-            const statsContainer = document.getElementById('logStats');
-            if (statsData.success) {
-                const stats = statsData.data;
-                statsContainer.innerHTML = 
-                    '<span>24小時: ' + stats.total_24h + ' 筆</span> | ' +
-                    '<span>7天: ' + stats.total_7d + ' 筆</span> | ' +
-                    '<span>下單: ' + (stats.by_type.ORDER_SUCCESS || 0) + '</span> | ' +
-                    '<span>平倉: ' + (stats.by_type.CLOSE_POSITION || 0) + '</span> | ' +
-                    '<span>風控: ' + (stats.by_type.RISK_BLOCKED || 0) + '</span>';
-            }
-            
-        } catch (e) {
-            console.error('Error loading trade logs:', e);
-            document.getElementById('tradeLogs').innerHTML = '<div class="empty-state">載入失敗: ' + e.message + '</div>';
         }
+    } catch (e) {
+        console.error('載入圖表失敗:', e);
+        document.getElementById('chartInfo').textContent = '載入失敗';
     }
-    
-    function getLogTypeClass(eventType) {
-        const classes = {
-            'ORDER_SUCCESS': 'badge-success',
-            'CLOSE_POSITION': 'badge-primary',
-            'RISK_BLOCKED': 'badge-danger',
-            'ORDER_FAILED': 'badge-warning',
-            'SYSTEM': ''
-        };
-        return classes[eventType] || '';
+}
+
+async function loadStrategies() {
+    try {
+        const res = await apiCall('/api/chart/strategies');
+        const select = document.getElementById('strategySelect');
+        select.innerHTML = '<option value="">全部訊號</option>';
+        
+        if (res.success && res.data) {
+            res.data.filter(s => s.enabled).forEach(s => {
+                const option = document.createElement('option');
+                option.value = s.id;
+                option.textContent = `${s.name} (${s.symbol})`;
+                select.appendChild(option);
+            });
+        }
+    } catch (e) {
+        console.error('載入策略失敗:', e);
     }
-    
-    function getLogTypeIcon(eventType) {
-        const icons = {
-            'ORDER_SUCCESS': '✅',
-            'CLOSE_POSITION': '📤',
-            'RISK_BLOCKED': '🛡️',
-            'ORDER_FAILED': '❌',
-            'SYSTEM': 'ℹ️'
-        };
-        return icons[eventType] || '📝';
+}
+
+async function loadSystemStatus() {
+    try {
+        const [statusRes, strategiesRes, positionsRes, riskRes, perfRes] = await Promise.all([
+            fetch('/api/status'),
+            fetch('/api/strategies'),
+            fetch('/api/positions'),
+            fetch('/api/risk'),
+            fetch('/api/performance?period=today')
+        ]);
+        
+        const status = await statusRes.json();
+        const strategies = await strategiesRes.json();
+        const positions = await positionsRes.json();
+        const risk = await riskRes.json();
+        const perf = await perfRes.json();
+        
+        cachedStatusData = { status, strategies, positions, risk, perf };
+        
+        const now = new Date();
+        document.getElementById('lastRefresh').textContent = '更新: ' + now.toLocaleTimeString();
+        
+        const trading = status.trading_hours?.status || 'non_trading';
+        const tradingDot = document.getElementById('tradingStatusDot');
+        const tradingText = document.getElementById('tradingStatus');
+        if (trading === 'trading') {
+            tradingDot.className = 'status-indicator status-green';
+            tradingText.textContent = '進行中';
+        } else {
+            tradingDot.className = 'status-indicator status-red';
+            tradingText.textContent = '非交易時段';
+        }
+        
+        const conn = status.connection?.status || 'disconnected';
+        const connDot = document.getElementById('connStatusDot');
+        const connText = document.getElementById('connStatus');
+        if (conn === 'connected') {
+            connDot.className = 'status-indicator status-green';
+            connText.textContent = '正常';
+        } else {
+            connDot.className = 'status-indicator status-red';
+            connText.textContent = '中斷';
+        }
+        
+        const pnl = perf.success ? perf.total_pnl : (positions.summary?.total_pnl || 0);
+        const totalPnlEl = document.getElementById('totalPnl');
+        totalPnlEl.textContent = (pnl >= 0 ? '+' : '') + pnl.toLocaleString();
+        totalPnlEl.className = 'stat-value ' + (pnl >= 0 ? 'pnl-positive' : 'pnl-negative');
+        
+        if (perf.success) {
+            document.getElementById('realizedPnl').textContent = (perf.realized_pnl >= 0 ? '+' : '') + (perf.realized_pnl || 0).toLocaleString();
+            document.getElementById('realizedPnl').className = 'stat-value ' + ((perf.realized_pnl || 0) >= 0 ? 'pnl-positive' : 'pnl-negative');
+            document.getElementById('unrealizedPnl').textContent = (perf.unrealized_pnl >= 0 ? '+' : '') + (perf.unrealized_pnl || 0).toLocaleString();
+            document.getElementById('unrealizedPnl').className = 'stat-value ' + ((perf.unrealized_pnl || 0) >= 0 ? 'pnl-positive' : 'pnl-negative');
+        } else {
+            document.getElementById('realizedPnl').textContent = '--';
+            document.getElementById('unrealizedPnl').textContent = '--';
+        }
+        
+        const posList = document.getElementById('positionsList');
+        const posData = positions.data || [];
+        document.getElementById('totalQuantity').textContent = posData.reduce((sum, p) => sum + Math.abs(p.quantity), 0) + '口';
+        
+        if (posData.length === 0) {
+            posList.innerHTML = '<div class="empty-state">目前無部位</div>';
+        } else {
+            posList.innerHTML = posData.map(p => `
+                <div class="position-item">
+                    <div class="position-info">
+                        <span class="direction-badge ${p.direction === '多' ? 'direction-long' : 'direction-short'}">${p.direction}</span>
+                        <span>${p.symbol}</span>
+                        <span style="color: var(--text-secondary);">${Math.abs(p.quantity)}口</span>
+                    </div>
+                    <span class="${p.pnl >= 0 ? 'pnl-positive' : 'pnl-negative'}">${p.pnl >= 0 ? '+' : ''}${p.pnl.toLocaleString()}</span>
+                </div>
+            `).join('');
+        }
+        
+        const riskData = risk.data || {};
+        document.getElementById('riskPosition').textContent = `${riskData.current_position || 0} / ${riskData.max_position || 0}`;
+        document.getElementById('riskOrders').textContent = `${riskData.orders_this_minute || 0} / ${riskData.max_orders_per_minute || 0}`;
+        document.getElementById('riskDailyPnl').textContent = (riskData.daily_pnl >= 0 ? '+' : '') + (riskData.daily_pnl || 0).toLocaleString();
+        
+        const stratData = strategies.data || [];
+        const enabled = stratData.filter(s => s.enabled).length;
+        const running = stratData.filter(s => s.is_running).length;
+        document.getElementById('enabledStrategies').textContent = `${enabled} / ${stratData.length}`;
+        document.getElementById('runningStrategies').textContent = running;
+        
+        renderSqliteSection(status);
+    } catch (e) {
+        console.error('載入系統狀態失敗:', e);
     }
+}
+
+async function loadTradeLogs() {
+    try {
+        const res = await apiCall('/api/trade-logs?limit=10');
+        const container = document.getElementById('tradeLogsList');
+        
+        if (!res.success || !res.data?.length) {
+            container.innerHTML = '<div class="empty-state">目前無交易日誌</div>';
+            return;
+        }
+        
+        container.innerHTML = res.data.map(log => {
+            const icons = { 'ORDER_SUCCESS': '✅', 'CLOSE_POSITION': '📤', 'RISK_BLOCKED': '🛡️', 'ORDER_FAILED': '❌', 'SYSTEM': 'ℹ️' };
+            const badges = { 'ORDER_SUCCESS': 'log-badge-success', 'CLOSE_POSITION': 'log-badge-info', 'RISK_BLOCKED': 'log-badge-danger', 'ORDER_FAILED': 'log-badge-warning', 'SYSTEM': '' };
+            const icon = icons[log.event_type] || '📝';
+            const badge = badges[log.event_type] || '';
+            
+            return `
+                <div class="log-item">
+                    <span class="log-icon">${icon}</span>
+                    <div class="log-content">
+                        <div class="log-strategy">${log.strategy_name || log.strategy_id}</div>
+                        <div class="log-message">${log.message}</div>
+                    </div>
+                    <span class="log-time">${log.formatted_time?.split(' ')[1] || ''}</span>
+                    <span class="log-badge ${badge}">${log.event_type_display || log.event_type}</span>
+                </div>
+            `;
+        }).join('');
+    } catch (e) {
+        console.error('載入交易日誌失敗:', e);
+        document.getElementById('tradeLogsList').innerHTML = '<div class="empty-state">載入失敗</div>';
+    }
+}
+
+function toggleSqlite() {
+    const content = document.getElementById('sqliteContent');
+    const toggle = document.getElementById('sqliteToggle');
+    content.classList.toggle('expanded');
+    toggle.classList.toggle('expanded');
     
-    // 頁面載入時執行
-    loadSystemStatus();
-    loadTradeLogs();
+    if (cachedStatusData) {
+        renderSqliteSection(cachedStatusData.status);
+    }
+}
+
+function renderSqliteSection(status) {
+    const sqliteDiv = document.getElementById('sqliteData');
+    const isExpanded = document.getElementById('sqliteContent').classList.contains('expanded');
+    if (status.sqlite_error) {
+        sqliteDiv.innerHTML = '<div style="color: var(--danger);">載入失敗</div>';
+    } else {
+        const sqlite = status.sqlite || {};
+        let html = '';
+        for (const [symbol, data] of Object.entries(sqlite)) {
+            const count = typeof data === 'number' ? data : (data?.count || 0);
+            const latest = typeof data === 'object' ? (data?.latest_date || '-') : '-';
+            const totalDays = typeof data === 'object' ? (data?.total_days || 0) : 0;
+            const workdayGaps = typeof data === 'object' ? (data?.workday_gaps || 0) : 0;
+            const tradingSuspicious = typeof data === 'object' ? (data?.trading_hours_suspicious || 0) : 0;
+            const hasIssues = workdayGaps > 0 || tradingSuspicious > 0;
+            
+            if (isExpanded) {
+                html += `
+                    <div style="padding: 8px 0; border-bottom: 1px solid var(--border-color);">
+                        <div style="display: flex; justify-content: space-between; font-size: 12px;">
+                            <span>${hasIssues ? '⚠️' : '✅'} ${symbol}</span>
+                            <span>${Number(count).toLocaleString()} 筆</span>
+                        </div>
+                        <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
+                            📅 ${totalDays} 天 | 最新: ${latest}
+                        </div>
+                        <div style="font-size: 11px; margin-top: 4px;">
+                            <span style="color: ${workdayGaps > 0 ? 'var(--btn-warning)' : 'var(--success)'};">
+                                📆 工作日缺口: ${workdayGaps} 天
+                            </span>
+                        </div>
+                        <div style="font-size: 11px; margin-top: 2px;">
+                            <span style="color: ${tradingSuspicious > 0 ? 'var(--btn-warning)' : 'var(--success)'};">
+                                ⏰ 交易時段異常: ${tradingSuspicious} 天
+                            </span>
+                        </div>
+                    </div>
+                `;
+            } else {
+                html += `
+                    <div style="padding: 6px 0; border-bottom: 1px solid var(--border-color);">
+                        <div style="display: flex; justify-content: space-between; font-size: 12px;">
+                            <span>${hasIssues ? '⚠️' : '✅'} ${symbol}</span>
+                            <span>${Number(count).toLocaleString()} 筆</span>
+                        </div>
+                        <div style="font-size: 11px; color: var(--text-secondary);">📅 最新: ${latest}</div>
+                    </div>
+                `;
+            }
+        }
+        html += `<div style="padding-top: 8px; font-size: 12px; color: var(--text-secondary);">總計: ${Number(status.total || 0).toLocaleString()} 筆</div>`;
+        sqliteDiv.innerHTML = html || '<div class="empty-state">無數據</div>';
+    }
+}
+
+async function fetchMissingData(e) {
+    e.stopPropagation();
+    const btn = e.target;
+    btn.disabled = true;
+    btn.textContent = '🔄 獲取中...';
     
-    // 每30秒自動刷新
+    try {
+        const res = await apiCall('/api/sqlite/fetch-missing', 'POST');
+        if (res.success) {
+            alert('✅ 獲取完成！共 ' + res.result.total_fetched + ' 筆');
+            loadSystemStatus();
+        } else {
+            alert('❌ 獲取失敗');
+        }
+    } catch (e) {
+        alert('❌ 請求失敗');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '🔄 獲取缺失數據';
+    }
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    setTimeout(function() {
+        initChart();
+        loadStrategies();
+        loadChart();
+        loadSystemStatus();
+        loadTradeLogs();
+    }, 100);
+    
+    // 系統狀態和交易日誌每 30 秒刷新
     setInterval(function() {
         loadSystemStatus();
         loadTradeLogs();
     }, REFRESH_INTERVAL);
+    
+    // 圖表每 15 秒刷新（即時 K 棒更新）
+    setInterval(function() {
+        loadChart();
+    }, 15000);
+});
 </script>
 {% endblock %}

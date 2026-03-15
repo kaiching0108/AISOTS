@@ -10,18 +10,22 @@ from loguru import logger
 
 
 class KBarSQLite:
-    """K棒数据 SQLite 存储"""
+    """K 棒数据 SQLite 存储"""
     
-    MAX_RECORDS = 600000
-    CLEANUP_THRESHOLD = 700000
+    DEFAULT_MAX_RECORDS = 600000
+    DEFAULT_CLEANUP_THRESHOLD = 700000
     
-    def __init__(self, db_path: Path):
+    def __init__(self, db_path: Path, max_records: Optional[int] = None, cleanup_threshold: Optional[int] = None):
         """初始化 SQLite 存储
         
         Args:
             db_path: SQLite 数据库文件路径
+            max_records: 最大保留记录数，默认使用 DEFAULT_MAX_RECORDS
+            cleanup_threshold: 清理阈值，默认使用 DEFAULT_CLEANUP_THRESHOLD
         """
         self.db_path = db_path
+        self.MAX_RECORDS = max_records or self.DEFAULT_MAX_RECORDS
+        self.CLEANUP_THRESHOLD = cleanup_threshold or self.DEFAULT_CLEANUP_THRESHOLD
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_database()
     
@@ -60,6 +64,7 @@ class KBarSQLite:
                     low_price REAL NOT NULL,
                     close_price REAL NOT NULL,
                     volume REAL NOT NULL,
+                    source TEXT DEFAULT 'historical',
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(symbol, ts)
                 )
@@ -75,6 +80,12 @@ class KBarSQLite:
                 ON kbars(symbol)
             """)
             
+            # 添加 source 字段（如果不存在）
+            try:
+                conn.execute("ALTER TABLE kbars ADD COLUMN source TEXT DEFAULT 'historical'")
+            except sqlite3.OperationalError:
+                pass
+            
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS fetch_log (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -82,10 +93,16 @@ class KBarSQLite:
                     check_date TEXT NOT NULL,
                     records_fetched INTEGER,
                     status TEXT,
+                    fetch_type TEXT DEFAULT 'daily',
                     checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE(symbol, check_date)
+                    UNIQUE(symbol, check_date, fetch_type)
                 )
             """)
+            
+            try:
+                conn.execute("ALTER TABLE fetch_log ADD COLUMN fetch_type TEXT DEFAULT 'daily'")
+            except sqlite3.OperationalError:
+                pass
             
             conn.commit()
         
@@ -124,12 +141,13 @@ class KBarSQLite:
                 return base
         return actual_code
     
-    def insert_kbars(self, symbol: str, kbars_data: Dict) -> int:
+    def insert_kbars(self, symbol: str, kbars_data: Dict, source: str = 'historical') -> int:
         """插入 K 棒數據（忽略重複）
         
         Args:
             symbol: 期貨代碼（基本代碼如 TXF，會自動轉換為 TXFR1）
             kbars_data: K 棒數據字典，包含 ts, open, high, low, close, volume
+            source: 數據來源 ('historical', 'daily', 'initial', 'realtime')
             
         Returns:
             插入的記錄數
@@ -158,8 +176,8 @@ class KBarSQLite:
                     
                     cursor = conn.execute("""
                         INSERT OR IGNORE INTO kbars 
-                        (symbol, ts, open_price, high_price, low_price, close_price, volume)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        (symbol, ts, open_price, high_price, low_price, close_price, volume, source)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
                         actual_symbol,
                         ts_val,
@@ -168,6 +186,7 @@ class KBarSQLite:
                         float(low_list[i]) if i < len(low_list) else 0,
                         float(close_list[i]) if i < len(close_list) else 0,
                         float(volume_list[i]) if i < len(volume_list) else 0,
+                        source,
                     ))
                     if cursor.rowcount > 0:
                         inserted_count += 1
@@ -422,7 +441,7 @@ class KBarSQLite:
             "confirmed_with_data": len(confirmed_with_data),
         }
     
-    def log_fetch_attempt(self, symbol: str, check_date: str, records_fetched: int, status: str) -> None:
+    def log_fetch_attempt(self, symbol: str, check_date: str, records_fetched: int, status: str, fetch_type: str = 'daily') -> None:
         """記錄補抓結果
         
         Args:
@@ -430,18 +449,37 @@ class KBarSQLite:
             check_date: 檢查的日期 (YYYY-MM-DD)
             records_fetched: 取得的資料筆數
             status: 'success' | 'no_data' | 'error'
+            fetch_type: 抓取類型 ('daily' 或 'initial')
         """
         symbol = self.get_actual_code(symbol)
         
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("""
                 INSERT OR REPLACE INTO fetch_log 
-                (symbol, check_date, records_fetched, status, checked_at)
-                VALUES (?, ?, ?, ?, datetime('now'))
-            """, (symbol, check_date, records_fetched, status))
+                (symbol, check_date, records_fetched, status, fetch_type, checked_at)
+                VALUES (?, ?, ?, ?, ?, datetime('now'))
+            """, (symbol, check_date, records_fetched, status, fetch_type))
             conn.commit()
         
-        logger.info(f"記錄補抓結果: {symbol} {check_date} - {status} ({records_fetched} 筆)")
+        logger.info(f"記錄補抓結果: {symbol} {check_date} - {status} ({records_fetched} 筆, type={fetch_type})")
+    
+    def get_today_fetch_count_by_type(self, fetch_type: str) -> int:
+        """获取指定类型今日的抓取总记录数
+        
+        Args:
+            fetch_type: 抓取类型 ('initial' 或 'daily')
+            
+        Returns:
+            今日该类型的抓取总记录数
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute("""
+                SELECT COALESCE(SUM(records_fetched), 0) as count 
+                FROM fetch_log 
+                WHERE fetch_type = ? AND DATE(checked_at, 'localtime') = DATE('now', 'localtime')
+            """, (fetch_type,))
+            row = cursor.fetchone()
+            return row[0] if row else 0
     
     def get_confirmed_no_data_dates(self, symbol: str) -> set:
         """獲取已確認無資料的日期
@@ -529,29 +567,25 @@ class KBarSQLite:
         Returns:
             今日写入的 K 棒数量
         """
-        from datetime import datetime
-        today = datetime.now().date().isoformat()
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute("""
                 SELECT COUNT(*) as count FROM kbars 
-                WHERE symbol = ? AND DATE(created_at) = ?
-            """, (self.get_actual_code(symbol), today))
+                WHERE symbol = ? AND DATE(created_at, 'localtime') = DATE('now', 'localtime')
+            """, (self.get_actual_code(symbol),))
             row = cursor.fetchone()
             return row[0] if row else 0
     
     def get_total_today_count(self) -> int:
-        """获取今日写入的所有 K棒数量（所有 symbol 合计）
+        """获取今日写入的所有 K 棒数量（所有 symbol 合计）
         
         Returns:
-            今日写入的所有 K棒数量
+            今日写入的所有 K 棒数量
         """
-        from datetime import datetime
-        today = datetime.now().date().isoformat()
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute("""
                 SELECT COUNT(*) as count FROM kbars 
-                WHERE DATE(created_at) = ?
-            """, (today,))
+                WHERE DATE(created_at, 'localtime') = DATE('now', 'localtime')
+            """)
             row = cursor.fetchone()
             return row[0] if row else 0
     

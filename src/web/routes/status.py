@@ -25,6 +25,12 @@ def get_status():
             reconnect_count = getattr(conn_mgr, 'reconnect_count', 0)
             last_check_time = datetime.now().isoformat()
         
+        # 取得交易時段狀態
+        trading_hours_status = "non_trading"
+        if hasattr(current_app, 'strategy_runner') and current_app.strategy_runner:
+            is_trading = current_app.strategy_runner.is_within_trading_hours()
+            trading_hours_status = "trading" if is_trading else "non_trading"
+        
         return jsonify({
             "success": True,
             "message": status_text,
@@ -35,6 +41,9 @@ def get_status():
                 "status": connection_status,
                 "reconnect_count": reconnect_count,
                 "last_check": last_check_time
+            },
+            "trading_hours": {
+                "status": trading_hours_status
             }
         })
     except Exception as e:

@@ -284,4 +284,69 @@ kbars_data = {
 
 ---
 
-**最後更新**: 2026-03-09
+## 10. 實盤即時 K 棒寫入
+
+### 功能說明
+
+實盤模式下，系統會將即時 K 棒即時寫入 SQLite，供圖表頁面即時顯示最新走勢。
+
+### 運作機制
+
+```
+Shioaji API (tick)
+    ↓
+RealtimeKBarAggregator.process_tick()
+    ↓ 跨分鐘時
+KBarSQLite.insert_kbars() → kbars.sqlite
+    ↓
+/api/chart/kbars → 讀取 SQLite（含即時資料）
+    ↓
+前端每 15 秒輪詢更新圖表
+```
+
+### 啟用條件
+
+- 僅在**實盤模式**啟用（`--simulate` 模擬模式不寫入）
+- 系統初始化時自動檢測模式
+- 日誌顯示：「即時 K-bar SQLite 寫入已啟用（實盤模式）」
+
+### 相關程式碼
+
+| 檔案 | 說明 |
+|------|------|
+| `src/services/realtime_kbar_aggregator.py` | 即時 K 棒聚合器，含 SQLite 寫入 |
+| `main.py` | 初始化時連接 KBarSQLite 到 aggregator |
+
+---
+
+## 11. 數據來源標記 (source)
+
+### 字段說明
+
+kbars 表新增 `source` 字段，用於標記數據來源：
+
+| source 值 | 說明 |
+|----------|------|
+| `historical` | 歷史數據（預設值，舊數據） |
+| `initial` | 初始化抓取（系統啟動時） |
+| `daily` | 每日定時抓取 |
+| `realtime` | 實盤即時寫入（tick 聚合） |
+
+### 查詢示例
+
+```sql
+-- 查看所有實時寫入的 K 棒
+SELECT * FROM kbars WHERE source = 'realtime';
+
+-- 查看某天的數據來源分布
+SELECT source, COUNT(*) as count FROM kbars 
+WHERE ts >= 1739539200 AND ts < 1739625600 
+GROUP BY source;
+
+-- 查看特定來源的最新數據
+SELECT MAX(ts) as latest, source FROM kbars GROUP BY source;
+```
+
+---
+
+**最後更新**: 2026-03-16

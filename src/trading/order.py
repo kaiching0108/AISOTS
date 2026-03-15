@@ -17,7 +17,8 @@ class Order:
         price: float = 0,
         price_type: str = "MKT",
         order_type: str = "ROD",
-        reason: str = ""
+        reason: str = "",
+        is_close_order: bool = False
     ):
         self.order_id = f"ord_{uuid.uuid4().hex[:8]}"
         self.strategy_id = strategy_id
@@ -29,6 +30,7 @@ class Order:
         self.price_type = price_type
         self.order_type = order_type
         self.reason = reason
+        self.is_close_order = is_close_order
         
         self.status = "Pending"  # Pending, Submitted, Filled, Cancelled, Rejected
         self.filled_price: Optional[float] = None
@@ -36,7 +38,7 @@ class Order:
         self.timestamp = datetime.now().isoformat()
         
         # Shioaji 相關
-        self.shioaji_trade: Optional[any] = None
+        self.shioaji_trade = None
         self.seqno: Optional[str] = None
     
     def to_dict(self) -> dict:
@@ -52,6 +54,7 @@ class Order:
             "price_type": self.price_type,
             "order_type": self.order_type,
             "reason": self.reason,
+            "is_close_order": self.is_close_order,
             "status": self.status,
             "filled_price": self.filled_price,
             "filled_time": self.filled_time,
@@ -71,9 +74,10 @@ class Order:
             price=data.get("price", 0),
             price_type=data.get("price_type", "LMT"),
             order_type=data.get("order_type", "ROD"),
-            reason=data.get("reason", "")
+            reason=data.get("reason", ""),
+            is_close_order=data.get("is_close_order", False)
         )
-        order.order_id = data.get("order_id", order.order_id)
+        order.order_id = data.get("order_id") or order.order_id
         order.status = data.get("status", "Pending")
         order.filled_price = data.get("filled_price")
         order.filled_time = data.get("filled_time")
@@ -81,7 +85,7 @@ class Order:
         order.seqno = data.get("seqno")
         return order
     
-    def mark_submitted(self, seqno: str = None) -> None:
+    def mark_submitted(self, seqno: Optional[str] = None) -> None:
         """標記為已提交"""
         self.status = "Submitted"
         if seqno:

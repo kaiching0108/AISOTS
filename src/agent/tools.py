@@ -7,6 +7,7 @@ from src.logger import logger
 from src.trading.strategy_manager import StrategyManager
 from src.trading.position_manager import PositionManager
 from src.trading.order_manager import OrderManager
+from src.trading.order import Order
 from src.risk.risk_manager import RiskManager
 from src.notify.telegram import clean_markdown_for_telegram
 
@@ -351,8 +352,7 @@ ID: {strategy_id}
                 logger.info(f"準備平倉舊策略 {old_strategy_id}: {position.symbol} {position.direction} {position.quantity}口")
                 
                 # 取得現價
-                contract = self.api.get_contract(position.symbol)
-                current_price = contract.last_price if contract and hasattr(contract, 'last_price') and contract.last_price else 0
+                current_price = self.api.get_latest_price(position.symbol) or 0
                 
                 if current_price > 0:
                     # 強制平倉
@@ -435,7 +435,7 @@ ID: {strategy_id}
                         close_error = "下單失敗 (返回 None)"
                         logger.error(f"平倉失敗: {close_error}")
                 else:
-                    close_error = f"無法取得現價 (contract={contract}, last_price={contract.last_price if contract else None})"
+                    close_error = f"無法取得現價 (symbol={position.symbol})"
                     logger.error(f"平倉失敗: {close_error}")
             else:
                 logger.info(f"舊策略 {old_strategy_id} 無部位或已平倉")
@@ -1560,82 +1560,82 @@ K線週期: {data['timeframe']}
             reason=reason or strategy.prompt[:50]
         )
         
-        # 執行下單
+        # 執行下單（阻塞等待 Shioaji 分配 seqno，最多 5 秒）
+        # 使用 on_seqno_assigned 回調，在獲取到 seqno 時立即註冊 mapping
+        def on_seqno_assigned(seqno: str):
+            """當獲取到 seqno 時立即註冊 mapping"""
+            self.order_mgr.submit_order(order.order_id, seqno)
+            logger.info(f"開倉下單：order_id={order.order_id}, seqno={seqno}, symbol={symbol}")
+        
         trade = self.api.place_order(
             symbol=symbol,
             action=action,
             quantity=quantity,
-            price=price
+            price=price,
+            on_seqno_assigned=on_seqno_assigned
+            # timeout 預設 5000 毫秒（5 秒）
         )
         
         if trade:
-            self.order_mgr.submit_order(order.order_id, trade.order.seqno if hasattr(trade.order, 'seqno') else None)
+            # 離線模擬模式：自動成交（使用委託價或市價）
             
-            # 取得成交價
-            filled_price = price
-            if hasattr(trade, 'filled_price'):
-                filled_price = trade.filled_price
-            elif hasattr(trade, 'price'):
-                filled_price = trade.price
-            elif price == 0:
-                contract = self.api.get_contract(symbol)
-                if contract:
-                    filled_price = contract.last_price
-            
-            # 模擬模式：自動成交
-            if self.api.skip_login or self.api.simulation:
+            # 記錄成交日誌
+            filled_price = 0
+            if self.api.skip_login:
+                filled_price = price if price > 0 else self.api.get_latest_price(symbol) or 0
                 self.order_mgr.fill_order(order.order_id, filled_price)
+                
+                self.trade_log_store.add_log(
+                    event_type="ORDER_FILLED",
+                    strategy_id=strategy_id,
+                    strategy_name=strategy_name,
+                    symbol=symbol,
+                    message=f"✅ {strategy_name} {'買進' if action == 'Buy' else '賣出'} {quantity}口 @ {filled_price}",
+                    details={
+                        "action": action,
+                        "quantity": quantity,
+                        "filled_price": filled_price,
+                        "order_id": order.order_id,
+                        "stop_loss": stop_loss,
+                        "take_profit": take_profit
+                    }
+                )
             
-            # 建立部位（帶入停損止盈點數）
+            # 記錄訊號（追蹤訊號來源）
             signal_action = "buy" if action == "Buy" else "sell"
             signal_id = self._get_signal_recorder().record_signal(
                 strategy_id=strategy_id,
                 strategy_version=strategy.strategy_version,
                 signal=signal_action,
-                price=filled_price,
+                price=price,  # 使用委託價格而非成交價
                 indicators={}
             )
             
-            position = self.position_mgr.open_position(
-                strategy_id=strategy_id,
-                strategy_name=strategy_name,
-                symbol=symbol,
-                direction=action,
-                quantity=quantity,
-                entry_price=filled_price,
-                stop_loss_points=stop_loss,
-                take_profit_points=take_profit,
-                signal_id=signal_id,
-                strategy_version=strategy.strategy_version
-            )
-            
-            if position is None:
-                return f"⚠️ 策略 {strategy_id} 已有部位，不開新倉"
-            
-            # 記錄交易日誌
+            # 記錄委託日誌
             self.trade_log_store.add_log(
-                event_type="ORDER_SUCCESS",
+                event_type="ORDER_SUBMITTED",
                 strategy_id=strategy_id,
                 strategy_name=strategy_name,
                 symbol=symbol,
-                message=f"✅ {strategy_name} {'買進' if action == 'Buy' else '賣出'} {quantity}口 @ {filled_price}",
+                message=f"📝 {strategy_name} {'買進' if action == 'Buy' else '賣出'} {quantity}口 @ {price or '市價'}",
                 details={
                     "action": action,
                     "quantity": quantity,
-                    "price": filled_price,
+                    "price": price,
+                    "order_id": order.order_id,
                     "stop_loss": stop_loss,
                     "take_profit": take_profit
                 }
             )
             
             msg = f"""
-✅ *下單成功*
+📝 *訂單已送出*
 ─────────────
 策略: {strategy_name}
 合約: {symbol}
 方向: {action}
 數量: {quantity}口
-價格: {filled_price}
+價格: {price if price > 0 else '市價'}
 停損: {stop_loss}點
 止盈: {take_profit}點
 """
@@ -1645,7 +1645,7 @@ K線週期: {data['timeframe']}
                 "symbol": symbol,
                 "action": action,
                 "quantity": quantity,
-                "price": filled_price,
+                "price": price,
                 "timestamp": datetime.now().isoformat()
             })
             
@@ -1654,128 +1654,155 @@ K線週期: {data['timeframe']}
             self.order_mgr.reject_order(order.order_id, "API 下單失敗")
             return "❌ 下單失敗: API 錯誤"
     
+    def _process_close_position(self, strategy_id: str, order: Order, filled_price: float) -> str:
+        """處理平倉（使用真實成交價）
+        
+        Args:
+            strategy_id: 策略 ID
+            order: 訂單物件
+            filled_price: 真實成交價
+            
+        Returns:
+            平倉結果訊息
+        """
+        position = self.position_mgr.get_position(strategy_id)
+        if not position:
+            logger.warning(f"策略 {strategy_id} 無部位可平（可能已平倉）")
+            return f"❌ 無部位可平"
+        
+        # 平倉部位（使用真實成交價）
+        result = self.position_mgr.close_position(strategy_id, filled_price)
+        if not result:
+            return "❌ 平倉失敗"
+        
+        signal_id = position.signal_id
+        strategy_version = position.strategy_version
+        
+        # 判斷出场原因
+        exit_reason = "signal_reversal"
+        if position.stop_loss and filled_price <= position.stop_loss:
+            exit_reason = "stop_loss"
+        elif position.take_profit and filled_price >= position.take_profit:
+            exit_reason = "take_profit"
+        
+        # 更新訊號記錄
+        if signal_id:
+            self._get_signal_recorder().update_result(
+                signal_id=signal_id,
+                strategy_id=strategy_id,
+                strategy_version=strategy_version,
+                status="filled",
+                exit_price=filled_price,
+                exit_reason=exit_reason,
+                pnl=result["pnl"],
+                filled_at=datetime.now().isoformat(),
+                filled_quantity=result["quantity"]
+            )
+        
+        # 更新訂單成交價
+        self.order_mgr.fill_order(order.order_id, filled_price)
+        
+        pnl = result["pnl"]
+        emoji = "🟢" if pnl >= 0 else "🔴"
+        close_action = order.action
+        
+        # 記錄交易日誌
+        self.trade_log_store.add_log(
+            event_type="CLOSE_POSITION",
+            strategy_id=strategy_id,
+            strategy_name=result.get('strategy_name', strategy_id),
+            symbol=result.get('symbol', ''),
+            message=f"{emoji} {result.get('strategy_name', strategy_id)} 平倉 {result.get('quantity', 0)}口 @ {filled_price} | 損益：{pnl:+,}",
+            details={
+                "exit_price": filled_price,
+                "quantity": result.get('quantity', 0),
+                "pnl": pnl,
+                "reason": exit_reason,
+                "entry_price": position.entry_price if position else 0,
+                "direction": position.direction if position else "",
+                "order_id": order.order_id
+            }
+        )
+        
+        msg = f"""
+{emoji} *平倉完成*
+───────────
+策略：{result['strategy_name']}
+合約：{result['symbol']}
+方向：{close_action} {result['quantity']}口
+平倉價：{filled_price}
+損益：{pnl:+,}
+"""
+        self.notifier.send_order_notification({
+            "status": "Filled",
+            "strategy_name": result["strategy_name"],
+            "symbol": result["symbol"],
+            "action": close_action,
+            "quantity": result["quantity"],
+            "filled_price": filled_price,
+            "timestamp": datetime.now().isoformat()
+        })
+        
+        return msg
+    
     def close_position(self, strategy_id: str, price: float = 0) -> str:
-        """平倉"""
+        """平倉
+        
+        Args:
+            strategy_id: 策略 ID
+            price: 指定價格（0=市價單，僅用於離線模式）
+            
+        Returns:
+            平倉結果訊息
+        """
         position = self.position_mgr.get_position(strategy_id)
         if not position:
             return f"❌ 策略 {strategy_id} 無部位可平"
         
-        # 取得現價
-        if price == 0:
-            contract = self.api.get_contract(position.symbol)
-            price = contract.last_price if contract else 0
-        
-        if price == 0:
-            return "❌ 無法取得現價"
-        
-        # 建立平倉訂單（在部位平倉前，先建立訂單記錄）
         close_action = "Sell" if position.direction == "Buy" else "Buy"
+        
+        # 建立平倉訂單（標記為平倉單）
         close_order = self.order_mgr.create_order(
             strategy_id=strategy_id,
             strategy_name=position.strategy_name,
             symbol=position.symbol,
             action=close_action,
             quantity=position.quantity,
-            price=price,
-            reason="平倉: 策略訊號或停損止盈"
+            price=0,  # 市價單
+            price_type="MKT",
+            reason="平倉：策略訊號或停損止盈",
+            is_close_order=True  # 標記為平倉單
         )
         
-        # 平倉部位
-        result = self.position_mgr.close_position(strategy_id, price)
+        # 離線模擬模式：立即平倉
+        if self.api.skip_login:
+            mock_price = self.api.get_latest_price(position.symbol) or 0
+            if mock_price == 0:
+                return "❌ 無法取得模擬價格"
+            return self._process_close_position(strategy_id, close_order, mock_price)
         
-        if result:
-            signal_id = position.signal_id
-            strategy_version = position.strategy_version
-            
-            # 判斷出场原因
-            exit_reason = "signal_reversal"
-            if position.stop_loss and price <= position.stop_loss:
-                exit_reason = "stop_loss"
-            elif position.take_profit and price >= position.take_profit:
-                exit_reason = "take_profit"
-            
-            # 更新訊號記錄
-            if signal_id:
-                self._get_signal_recorder().update_result(
-                    signal_id=signal_id,
-                    strategy_id=strategy_id,
-                    strategy_version=strategy_version,
-                    status="filled",
-                    exit_price=price,
-                    exit_reason=exit_reason,
-                    pnl=result["pnl"],
-                    filled_at=datetime.now().isoformat(),
-                    filled_quantity=result["quantity"]
-                )
-            
-            # 提交平倉訂單
-            self.order_mgr.submit_order(close_order.order_id, None)
-            
-            # 執行 API 下單
-            api_result = self.api.place_order(
-                symbol=position.symbol,
-                action=close_action,
-                quantity=position.quantity,
-                price=price
-            )
-            
-            # 模擬模式：自動成交
-            if self.api.skip_login or self.api.simulation:
-                self.order_mgr.fill_order(close_order.order_id, price)
-            elif api_result:
-                # 實盤模式且有成交結果
-                filled_price = price
-                if hasattr(api_result, 'filled_price'):
-                    filled_price = api_result.filled_price
-                elif hasattr(api_result, 'price'):
-                    filled_price = api_result.price
-                self.order_mgr.fill_order(close_order.order_id, filled_price)
-            
-            pnl = result["pnl"]
-            emoji = "🟢" if pnl >= 0 else "🔴"
-            
-            # 記錄交易日誌
-            self.trade_log_store.add_log(
-                event_type="CLOSE_POSITION",
-                strategy_id=strategy_id,
-                strategy_name=result.get('strategy_name', strategy_id),
-                symbol=result.get('symbol', ''),
-                message=f"{emoji} {result.get('strategy_name', strategy_id)} 平倉 {result.get('quantity', 0)}口 @ {price} | 損益: {pnl:+,}",
-                details={
-                    "exit_price": price,
-                    "quantity": result.get('quantity', 0),
-                    "pnl": pnl,
-                    "reason": exit_reason,
-                    "entry_price": position.entry_price if position else 0,
-                    "direction": position.direction if position else "",
-                    "order_id": close_order.order_id
-                }
-            )
-            
-            msg = f"""
-{emoji} *平倉完成*
-─────────────
-策略: {result['strategy_name']}
-合約: {result['symbol']}
-方向: {close_action} {result['quantity']}口
-平倉價: {price}
-損益: {pnl:+,}
-"""
-            self.notifier.send_order_notification({
-                "status": "Filled",
-                "strategy_name": result["strategy_name"],
-                "symbol": result["symbol"],
-                "action": close_action,
-                "quantity": result["quantity"],
-                "filled_price": price,
-                "timestamp": datetime.now().isoformat()
-            })
-            
-            return msg
+        # 在線模式：下市價單，等待 Shioaji 回調
+        # 使用 on_seqno_assigned 回調，在獲取到 seqno 時立即註冊 mapping
+        def on_seqno_assigned(seqno: str):
+            """當獲取到 seqno 時立即註冊 mapping"""
+            self.order_mgr.submit_order(close_order.order_id, seqno)
+            logger.info(f"平倉下單：order_id={close_order.order_id}, seqno={seqno}, symbol={position.symbol}")
+        
+        api_result = self.api.place_order(
+            symbol=position.symbol,
+            action=close_action,
+            quantity=position.quantity,
+            price=0,  # 市價單
+            price_type="MKT",
+            on_seqno_assigned=on_seqno_assigned
+            # timeout 預設 5000 毫秒（5 秒）
+        )
+        
+        if api_result:
+            return f"📝 平倉單已送出，等待成交... (symbol: {position.symbol}, quantity: {position.quantity})"
         else:
-            # 平倉失敗，取消訂單
             self.order_mgr.cancel_order(close_order.order_id)
-            return "❌ 平倉失敗"
+            return "❌ 平倉下單失敗"
     
     # ========== 市場數據工具 ==========
     
@@ -1786,14 +1813,16 @@ K線週期: {data['timeframe']}
         if not contract:
             return f"❌ 找不到合約: {symbol}"
         
+        latest_price = self.api.get_latest_price(symbol)
+        
         return f"""
-📈 *{contract.name}*
-────────────
-最新價: {contract.last_price}
-漲停: {contract.limit_up}
-跌停: {contract.limit_down}
-參考價: {contract.reference}
-"""
+ 📈 *{contract.name}*
+ ────────────
+ 最新價: {latest_price if latest_price else contract.reference}
+ 漲停: {contract.limit_up}
+ 跌停: {contract.limit_down}
+ 參考價: {contract.reference}
+ """
     
     def get_order_history(self, strategy_id: str = None) -> str:
         """取得訂單歷史"""

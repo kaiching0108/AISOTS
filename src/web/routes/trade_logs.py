@@ -103,6 +103,8 @@ def get_stats():
 def _get_event_type_display(event_type: str) -> str:
     """取得事件類型的中文顯示名稱"""
     mapping = {
+        "ORDER_SUBMITTED": "訂單提交",
+        "ORDER_FILLED": "訂單成交",
         "ORDER_SUCCESS": "下單成功",
         "CLOSE_POSITION": "平倉",
         "RISK_BLOCKED": "風控擋單",

@@ -1,0 +1,330 @@
+{% extends "base.html" %}
+
+{% block title %}K棒圖表 - AISOTS{% endblock %}
+
+{% block extra_css %}
+<style>
+    .chart-controls {
+        display: flex;
+        gap: 15px;
+        padding: 15px;
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        margin-bottom: 15px;
+        flex-wrap: wrap;
+        align-items: center;
+    }
+    .chart-controls label {
+        color: var(--text-secondary);
+        font-size: 14px;
+    }
+    .chart-controls select {
+        padding: 8px 12px;
+        border-radius: 6px;
+        border: 1px solid var(--border-color);
+        background: var(--bg-input);
+        color: var(--text-primary);
+        min-width: 120px;
+    }
+    .chart-controls select:focus {
+        border-color: var(--accent-blue);
+        outline: none;
+    }
+    #chart-container {
+        width: 100%;
+        height: 600px;
+        background: var(--bg-primary);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        overflow: hidden;
+    }
+    .chart-legend {
+        display: flex;
+        gap: 25px;
+        padding: 15px;
+        color: var(--text-secondary);
+        font-size: 14px;
+    }
+    .legend-item {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .legend-buy {
+        color: #3fb950;
+    }
+    .legend-sell {
+        color: #f85149;
+    }
+    .legend-close {
+        color: #d29922;
+    }
+    .chart-info {
+        display: flex;
+        justify-content: space-between;
+        padding: 10px 15px;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-bottom: none;
+        border-radius: 8px 8px 0 0;
+        color: var(--text-secondary);
+        font-size: 13px;
+    }
+    .chart-loading {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        color: var(--text-secondary);
+    }
+    @media (max-width: 768px) {
+        .chart-controls {
+            flex-direction: column;
+            align-items: stretch;
+        }
+        .chart-controls select {
+            width: 100%;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="chart-controls">
+    <div>
+        <label>期貨：</label>
+        <select id="symbolSelect" onchange="loadChart()">
+            <option value="TXF">TXF (台指期)</option>
+            <option value="MXF">MXF (小台指)</option>
+            <option value="TMF">TMF (微型台指)</option>
+        </select>
+    </div>
+    <div>
+        <label>週期：</label>
+        <select id="timeframeSelect" onchange="loadChart()">
+            <option value="1m">1 分鐘</option>
+            <option value="5m">5 分鐘</option>
+            <option value="15m" selected>15 分鐘</option>
+            <option value="30m">30 分鐘</option>
+            <option value="60m">60 分鐘</option>
+            <option value="1h">1 小時</option>
+            <option value="1d">1 日</option>
+        </select>
+    </div>
+    <div>
+        <label>策略訊號：</label>
+        <select id="strategySelect" onchange="loadChart()">
+            <option value="">-- 無 --</option>
+        </select>
+    </div>
+    <div>
+        <label>顯示數量：</label>
+        <select id="limitSelect" onchange="loadChart()">
+            <option value="100">100 根</option>
+            <option value="300" selected>300 根</option>
+            <option value="500">500 根</option>
+            <option value="1000">1000 根</option>
+        </select>
+    </div>
+    <button class="btn btn-primary" onclick="loadChart()">🔄 重新整理</button>
+</div>
+
+<div class="chart-info">
+    <span id="chartSymbol">TXF</span>
+    <span id="chartTimeframe">15 分鐘</span>
+    <span id="chartCount">載入中...</span>
+</div>
+<div id="chart-container"></div>
+
+<div class="chart-legend">
+    <div class="legend-item legend-buy">▲ 買入訊號</div>
+    <div class="legend-item legend-sell">▼ 賣出訊號</div>
+    <div class="legend-item legend-close">● 平倉/停損/停利</div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+console.log('LightweightCharts loaded:', typeof LightweightCharts);
+console.log('createChart:', typeof LightweightCharts?.createChart);
+
+let chart, candlestickSeries, volumeSeries;
+
+function initChart() {
+    const container = document.getElementById('chart-container');
+    
+    if (typeof LightweightCharts === 'undefined') {
+        console.error('LightweightCharts library not loaded!');
+        container.innerHTML = '<div style="color: red; padding: 20px;">圖表庫載入失敗，請刷新頁面</div>';
+        return;
+    }
+    
+    chart = LightweightCharts.createChart(container, {
+        width: container.clientWidth,
+        height: 600,
+        layout: {
+            background: { type: 'solid', color: '#0d1117' },
+            textColor: '#8b949e',
+        },
+        grid: {
+            vertLines: { color: '#21262d' },
+            horzLines: { color: '#21262d' },
+        },
+        crosshair: {
+            mode: LightweightCharts.CrosshairMode.Normal,
+            vertLine: {
+                color: '#58a6ff',
+                width: 1,
+                style: LightweightCharts.LineStyle.Dashed,
+            },
+            horzLine: {
+                color: '#58a6ff',
+                width: 1,
+                style: LightweightCharts.LineStyle.Dashed,
+            },
+        },
+        rightPriceScale: {
+            borderColor: '#30363d',
+        },
+        timeScale: {
+            borderColor: '#30363d',
+            timeVisible: true,
+            secondsVisible: false,
+        },
+    });
+
+    candlestickSeries = chart.addCandlestickSeries({
+        upColor: '#3fb950',
+        downColor: '#f85149',
+        borderUpColor: '#3fb950',
+        borderDownColor: '#f85149',
+        wickUpColor: '#3fb950',
+        wickDownColor: '#f85149',
+    });
+
+    volumeSeries = chart.addHistogramSeries({
+        color: '#26a69a',
+        priceFormat: { type: 'volume' },
+        priceScaleId: '',
+    });
+    volumeSeries.priceScale().applyOptions({
+        scaleMargins: { top: 0.8, bottom: 0 },
+    });
+
+    candlestickSeries.setMarkers([]);
+
+    window.addEventListener('resize', () => {
+        chart.resize(container.clientWidth, 600);
+    });
+}
+
+async function loadChart() {
+    if (!chart || !candlestickSeries) {
+        console.error('Chart not initialized');
+        document.getElementById('chartCount').textContent = '圖表初始化失敗';
+        return;
+    }
+    
+    const symbol = document.getElementById('symbolSelect').value;
+    const timeframe = document.getElementById('timeframeSelect').value;
+    const strategyId = document.getElementById('strategySelect').value;
+    const limit = document.getElementById('limitSelect').value;
+
+    document.getElementById('chartCount').textContent = '載入中...';
+
+    const timeframeNames = {
+        '1m': '1 分鐘',
+        '5m': '5 分鐘',
+        '15m': '15 分鐘',
+        '30m': '30 分鐘',
+        '60m': '60 分鐘',
+        '1h': '1 小時',
+        '1d': '1 日'
+    };
+    
+    document.getElementById('chartSymbol').textContent = symbol;
+    document.getElementById('chartTimeframe').textContent = timeframeNames[timeframe] || timeframe;
+
+    try {
+        const url = `/api/chart/kbars?symbol=${symbol}&timeframe=${timeframe}&limit=${limit}`;
+        console.log('Loading chart from:', url);
+        const res = await apiCall(url);
+        console.log('Chart response:', res);
+        
+        if (!res.success) {
+            document.getElementById('chartCount').textContent = '錯誤: ' + (res.error || 'Unknown error');
+            return;
+        }
+        
+        if (res.data && res.data.candlestick && res.data.candlestick.length > 0) {
+            candlestickSeries.setData(res.data.candlestick);
+            
+            const volData = res.data.volume.map(v => ({
+                time: v.time,
+                value: v.value,
+                color: v.close >= (res.data.candlestick.find(c => c.time === v.time)?.open || v.close) ? 'rgba(63, 185, 80, 0.5)' : 'rgba(248, 81, 73, 0.5)'
+            }));
+            volumeSeries.setData(volData);
+
+            document.getElementById('chartCount').textContent = `${res.data.candlestick.length} 根`;
+
+            if (strategyId) {
+                const signalsRes = await apiCall(`/api/chart/signals?strategy_id=${strategyId}`);
+                if (signalsRes.success && signalsRes.data && signalsRes.data.markers) {
+                    candlestickSeries.setMarkers(signalsRes.data.markers);
+                }
+            } else {
+                candlestickSeries.setMarkers([]);
+            }
+        } else {
+            document.getElementById('chartCount').textContent = '無資料';
+            candlestickSeries.setData([]);
+            volumeSeries.setData([]);
+        }
+    } catch (e) {
+        console.error('載入圖表失敗:', e);
+        document.getElementById('chartCount').textContent = '載入失敗';
+    }
+}
+
+async function loadStrategies() {
+    try {
+        const res = await apiCall('/api/chart/strategies');
+        console.log('Strategies response:', res);
+        const select = document.getElementById('strategySelect');
+        select.innerHTML = '<option value="">-- 無 --</option>';
+        
+        if (res.success && res.data) {
+            let enabledCount = 0;
+            res.data.forEach(s => {
+                if (s.enabled) {
+                    enabledCount++;
+                    const option = document.createElement('option');
+                    option.value = s.id;
+                    option.textContent = `${s.name} (${s.symbol})`;
+                    select.appendChild(option);
+                }
+            });
+            console.log('Enabled strategies count:', enabledCount);
+        }
+    } catch (e) {
+        console.error('載入策略失敗:', e);
+    }
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    // 延遲一點確保庫已載入
+    setTimeout(function() {
+        initChart();
+        loadStrategies();
+        loadChart();
+    }, 100);
+    
+    // 圖表每 15 秒刷新（即時 K 棒更新）
+    setInterval(function() {
+        loadChart();
+    }, 15000);
+});
+</script>
+{% endblock %}

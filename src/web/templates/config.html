@@ -5,7 +5,7 @@
 {% block extra_css %}
 <style>
     .config-section {
-        background: white;
+        background: var(--bg-card);
         border-radius: 8px;
         padding: 20px;
         margin-bottom: 20px;
@@ -34,7 +34,7 @@
     .form-group select {
         width: 100%;
         padding: 10px;
-        border: 1px solid #ddd;
+        border: 1px solid var(--border-color);
         border-radius: 5px;
         font-size: 14px;
     }
@@ -115,7 +115,7 @@
     }
     
     .sensitive-field {
-        background: #fffde7;
+        background: var(--bg-card);
     }
 </style>
 {% endblock %}
@@ -265,9 +265,16 @@ function renderForm(data) {
             <!-- 交易配置 -->
             <div class="config-section">
                 <h3>交易配置</h3>
-                <div class="form-group">
-                    <label>檢查間隔 (秒)</label>
-                    <input type="number" id="trading_check_interval" value="${data.trading.check_interval}" min="10" max="300">
+                <div class="row">
+                    <div class="form-group">
+                        <label>檢查間隔 (秒)</label>
+                        <input type="number" id="trading_check_interval" value="${data.trading.check_interval}" min="10" max="300">
+                    </div>
+                    <div class="form-group">
+                        <label>訂單超時取消 (秒)</label>
+                        <input type="number" id="trading_stale_order_timeout" value="${data.trading.stale_order_timeout}" min="0" max="3600">
+                        <div class="hint">超過此時間未成交的訂單將自動取消（0=不啟用）</div>
+                    </div>
                 </div>
                 <div class="row">
                     <div class="form-group">
@@ -323,7 +330,7 @@ function renderForm(data) {
                     <div class="hint">每日定時抓取前一天數據的時間</div>
                 </div>
                 
-                <h4 style="color: #666; margin-top: 20px; margin-bottom: 10px;">每日抓取設定</h4>
+                <h4 style="color: var(--text-secondary); margin-top: 20px; margin-bottom: 10px;">每日抓取設定</h4>
                 <div class="row">
                     <div class="form-group">
                         <label>每次 API 呼叫抓取筆數</label>
@@ -342,7 +349,7 @@ function renderForm(data) {
                            value="${data.data_update.daily?.daily_max || 10000}" min="1" max="100000">
                 </div>
                 
-                <h4 style="color: #666; margin-top: 20px; margin-bottom: 10px;">系統啓動時抓取設定</h4>
+                <h4 style="color: var(--text-secondary); margin-top: 20px; margin-bottom: 10px;">系統啓動時抓取設定</h4>
                 <div class="row">
                     <div class="form-group">
                         <label>每次 API 呼叫抓取筆數</label>
@@ -368,7 +375,7 @@ function renderForm(data) {
                     </div>
                 </div>
                 
-                <h4 style="color: #666; margin-top: 20px; margin-bottom: 10px;">存儲設定</h4>
+                <h4 style="color: var(--text-secondary); margin-top: 20px; margin-bottom: 10px;">存儲設定</h4>
                 <div class="row">
                     <div class="form-group">
                         <label>最大保留記錄數</label>
@@ -435,6 +442,7 @@ async function saveConfig(event) {
         },
         trading: {
             check_interval: parseInt(document.getElementById('trading_check_interval').value),
+            stale_order_timeout: parseInt(document.getElementById('trading_stale_order_timeout').value),
             trading_hours: {
                 day_start: document.getElementById('trading_day_start').value,
                 day_end: document.getElementById('trading_day_end').value,

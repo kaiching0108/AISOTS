@@ -12,14 +12,14 @@
     }
     .perf-bar select {
         padding: 6px 10px;
-        border: 1px solid #ddd;
+        border: 1px solid var(--border-color);
         border-radius: 4px;
         font-size: 14px;
     }
     .strategy-card {
         display: flex;
         flex-wrap: wrap;
-        border: 1px solid #eee;
+        border: 1px solid var(--border-color);
         border-radius: 5px;
         margin-bottom: 8px;
         overflow: hidden;
@@ -33,12 +33,12 @@
     .card-left {
         flex: 0 0 65%;
         padding: 10px 12px;
-        background: #fff;
+        background: var(--bg-secondary);
     }
     .card-right {
         flex: 0 0 35%;
         padding: 10px 12px;
-        background: #f8f9fa;
+        background: var(--bg-card);
         display: flex;
         flex-direction: column;
         align-items: center;
@@ -53,7 +53,7 @@
     }
     .card-info-row {
         font-size: 12px;
-        color: #666;
+        color: var(--text-secondary);
         display: flex;
         gap: 8px;
         flex-wrap: wrap;
@@ -63,7 +63,7 @@
     }
     .perf-period {
         font-size: 11px;
-        color: #666;
+        color: var(--text-secondary);
         margin-bottom: 4px;
     }
     .perf-values {
@@ -80,7 +80,7 @@
     }
     .perf-item .label {
         font-size: 10px;
-        color: #666;
+        color: var(--text-secondary);
     }
     .perf-green { color: #27ae60; }
     .perf-yellow { color: #f39c12; }
@@ -88,8 +88,8 @@
     .card-actions {
         flex: 0 0 100%;
         padding: 8px 12px;
-        background: #fafafa;
-        border-top: 1px solid #eee;
+        background: var(--bg-secondary);
+        border-top: 1px solid var(--border-color);
         display: flex;
         gap: 5px;
         flex-wrap: wrap;
@@ -127,7 +127,7 @@
 
 <!-- 已啟用的策略區域 -->
 <div class="card" style="border-left: 4px solid #27ae60;">
-    <div class="card-header" style="background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%); color: white;">
+    <div class="card-header" style="background: linear-gradient(135deg, var(--success) 0%, #3fb950 100%); color: white;">
         📋 已啟用的策略
     </div>
     <div id="enabledStrategyList">
@@ -137,7 +137,7 @@
 
 <!-- 未啟用的策略區域 -->
 <div class="card" style="margin-top: 20px; border-left: 4px solid #95a5a6;">
-    <div class="card-header" style="background: linear-gradient(135deg, #95a5a6 0%, #bdc3c7 100%); color: white;">
+    <div class="card-header" style="background: linear-gradient(135deg, var(--text-muted) 0%, #6e7681 100%); color: white;">
         📋 未啟用的策略
     </div>
     <div id="disabledStrategyList">
@@ -185,7 +185,7 @@
                     ${s.enabled ? '✅ 啟用' : '❌ 停用'}
                 </span>
                 <strong>${s.name}</strong>
-                <span style="color: #666;">${s.id}</span>
+                <span style="color: var(--text-secondary);">${s.id}</span>
             </div>
             <div class="card-info-row">
                 <span>${s.symbol}</span>
@@ -233,9 +233,10 @@
         }
         
         // 部位警告
+        const positionPnlClass = s.position && s.position.pnl >= 0 ? 'color: var(--success);' : 'color: var(--danger);';
         const positionHtml = s.position ? `
-            <div style="padding: 8px 12px; background: #fff3cd; font-size: 12px;">
-                ⚠️ 部位: ${s.position.direction} ${s.position.quantity}口 @ ${s.position.entry_price} (${s.position.pnl >= 0 ? '+' : ''}${s.position.pnl})
+            <div style="padding: 8px 12px; background: rgba(210, 153, 34, 0.15); border: 1px solid var(--btn-warning); border-radius: 4px; font-size: 12px;">
+                ⚠️ 部位: <span style="font-weight: bold;">${s.position.direction} ${s.position.quantity}口</span> @ ${s.position.entry_price} <span style="${positionPnlClass} font-weight: bold;">(${s.position.pnl >= 0 ? '+' : ''}${s.position.pnl})</span>
             </div>
         ` : '';
         
@@ -292,14 +293,14 @@
             
             // 渲染已啟用的策略
             if (enabledStrategies.length === 0) {
-                document.getElementById('enabledStrategyList').innerHTML = '<div class="empty-state" style="padding: 30px; color: #666;">目前沒有啟用的策略</div>';
+                document.getElementById('enabledStrategyList').innerHTML = '<div class="empty-state" style="padding: 30px; color: var(--text-secondary);">目前沒有啟用的策略</div>';
             } else {
                 document.getElementById('enabledStrategyList').innerHTML = enabledStrategies.map(s => generateStrategyCard(s)).join('');
             }
             
             // 渲染未啟用的策略
             if (disabledStrategies.length === 0) {
-                document.getElementById('disabledStrategyList').innerHTML = '<div class="empty-state" style="padding: 30px; color: #666;">目前沒有未啟用的策略</div>';
+                document.getElementById('disabledStrategyList').innerHTML = '<div class="empty-state" style="padding: 30px; color: var(--text-secondary);">目前沒有未啟用的策略</div>';
             } else {
                 document.getElementById('disabledStrategyList').innerHTML = disabledStrategies.map(s => generateStrategyCard(s)).join('');
             }

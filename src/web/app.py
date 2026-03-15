@@ -4,7 +4,7 @@ from flask_apscheduler import APScheduler
 from loguru import logger
 
 
-def create_web_app(trading_tools, llm_provider=None, data_updater=None, connection_mgr=None):
+def create_web_app(trading_tools, llm_provider=None, data_updater=None, connection_mgr=None, strategy_runner=None):
     """建立 Flask 應用
     
     Args:
@@ -12,6 +12,7 @@ def create_web_app(trading_tools, llm_provider=None, data_updater=None, connecti
         llm_provider: LLM Provider 實例
         data_updater: DataUpdater 實例（可選）
         connection_mgr: ConnectionManager 實例（可選）
+        strategy_runner: StrategyRunner 實例（可選）
         
     Returns:
         Flask 應用
@@ -28,13 +29,18 @@ def create_web_app(trading_tools, llm_provider=None, data_updater=None, connecti
     app.llm_provider = llm_provider
     app.data_updater = data_updater
     app.connection_mgr = connection_mgr
+    app.strategy_runner = strategy_runner
     
     # 初始化 Flask-APScheduler
     if data_updater:
         scheduler = APScheduler()
         scheduler.init_app(app)
         
-        # 添加定時任務：每日 6:00 AM 更新 K棒數據
+        # 從配置讀取每日更新時間
+        update_time_str = data_updater.config.get('update_time', '06:00')
+        hour, minute = map(int, update_time_str.split(':'))
+        
+        # 添加定時任務：每日更新 K棒數據
         from datetime import datetime
         
         def scheduled_data_update():
@@ -54,13 +60,13 @@ def create_web_app(trading_tools, llm_provider=None, data_updater=None, connecti
             id='daily_data_update',
             func=scheduled_data_update,
             trigger='cron',
-            hour=6,
-            minute=0,
+            hour=hour,
+            minute=minute,
             replace_existing=True
         )
         
         scheduler.start()
-        logger.info("Flask-APScheduler 已啟動，每日 6:00 AM 執行數據更新")
+        logger.info(f"Flask-APScheduler 已啟動，每日 {update_time_str} 執行數據更新")
     
     # 註冊路由
     from src.web.routes import status, strategies, positions, risk, backtest
@@ -70,6 +76,7 @@ def create_web_app(trading_tools, llm_provider=None, data_updater=None, connecti
     from src.web.routes import trade_logs
     from src.web.routes import performance
     from src.web.routes import sqlite
+    from src.web.routes import chart
     
     app.register_blueprint(status.bp)
     app.register_blueprint(strategies.bp)
@@ -82,6 +89,7 @@ def create_web_app(trading_tools, llm_provider=None, data_updater=None, connecti
     app.register_blueprint(trade_logs.bp)
     app.register_blueprint(performance.bp)
     app.register_blueprint(sqlite.bp)
+    app.register_blueprint(chart.bp)
     
     # 提供 workspace 目录下的文件访问（如回测图表）
     import os
@@ -123,6 +131,11 @@ def create_web_app(trading_tools, llm_provider=None, data_updater=None, connecti
     def performance_page():
         """績效分析頁面"""
         return render_template('performance.html')
+    
+    @app.route('/chart')
+    def chart_page():
+        """K棒圖表頁面"""
+        return render_template('chart.html')
     
     logger.info("Flask Web 應用已建立")
     

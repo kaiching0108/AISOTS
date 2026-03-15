@@ -58,6 +58,7 @@ class TradingHoursConfig(BaseModel):
 
 class TradingConfig(BaseModel):
     check_interval: int = 60
+    stale_order_timeout: int = 300  # 5 分鐘超時
     trading_hours: TradingHoursConfig
 
 

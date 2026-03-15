@@ -4,6 +4,7 @@ import sys
 import argparse
 from pathlib import Path
 from datetime import datetime, time
+from typing import Dict
 import signal
 
 # 添加專案根目錄到 Python 路徑
@@ -20,6 +21,7 @@ from src.agent.providers import create_llm_provider
 from src.engine import StrategyRunner
 from src.services.data_updater import DataUpdater
 from src.services.realtime_kbar_aggregator import RealtimeKBarAggregator
+from src.storage.kbar_sqlite import KBarSQLite
 
 
 class AITradingSystem:
@@ -46,7 +48,8 @@ class AITradingSystem:
             api_key=self.config.shioaji.api_key,
             secret_key=self.config.shioaji.secret_key,
             simulation=self.config.shioaji.simulation,
-            skip_login=getattr(self.config.shioaji, 'skip_login', False)
+            skip_login=getattr(self.config.shioaji, 'skip_login', False),
+            config=self.config.data_update.model_dump() if hasattr(self.config, 'data_update') else None
         )
         
         # 連線管理
@@ -102,9 +105,10 @@ class AITradingSystem:
             order_manager=self.order_mgr,
             shioaji_client=self.shioaji,
             risk_manager=self.risk_mgr,
-            llm_provider=self.llm_provider,
+            llm_provider=self._llm_provider,
             notifier=self.notifier,
-            on_signal=self._on_strategy_signal
+            on_signal=self._on_strategy_signal,
+            trading_hours=self.config.trading.trading_hours.model_dump()
         )
 
         # 系統狀態
@@ -226,6 +230,14 @@ class AITradingSystem:
         # 只要已登入 Shioaji 就使用即時市場數據
         if not self.shioaji.skip_login:
             self._setup_tick_callback()
+            
+            # 初始化 KBarSQLite 並連接到即時 K-bar 聚合器
+            # 這樣實盤時會將即時 K 棒寫入 SQLite，供圖表顯示
+            kbar_db_path = self.workspace / 'kbars.sqlite'
+            if kbar_db_path.exists():
+                kbar_db = KBarSQLite(kbar_db_path)
+                self.realtime_aggregator.set_kbar_db(kbar_db)
+                self.logger.info("即時 K-bar SQLite 寫入已啟用（實盤模式）")
         
         # 顯示策略狀態
         strategies = self.strategy_mgr.get_all_strategies()
@@ -254,37 +266,176 @@ class AITradingSystem:
         
         return True
     
-    def _on_order_filled(self, order) -> None:
-        """成交回調"""
-        self.logger.info(f"訂單成交: {order.order_id}")
+    def _on_order_filled(self, seqno: str, msg: Dict) -> None:
+        """成交回調（處理 OrderState.FuturesDeal 結構）
         
-        # 發送通知
+        成交回報結構：
+        {
+            'trade_id': 'xxx',
+            'seqno': 'xxx',
+            'price': 25.0,          # 成交價
+            'quantity': 1,
+            'action': 'Buy',
+            'code': 'TMF',
+            'ts': 1764685425.0,
+            ...
+        }
+        """
+        self.logger.info(f"訂單成交 (seqno): {seqno}")
+        self.logger.debug(f"成交回調 msg: {msg}")
+        
+        # 通過 seqno 查找訂單
+        order = self.order_mgr.get_order_by_seqno(seqno)
+        if not order:
+            self.logger.error(f"❌ 找不到訂單：seqno={seqno}")
+            return
+        
+        order_id = order.order_id
+        self.logger.debug(f"✅ 匹配訂單：{order_id}")
+        
+        # 從成交回報（OrderState.FuturesDeal）中提取資訊
+        # 成交價在 msg 根層級
+        filled_price = msg.get("price", 0)
+        quantity = msg.get("quantity", order.quantity)
+        action = msg.get("action", order.action)
+        symbol = msg.get("code", order.symbol)
+        ts = msg.get("ts", 0)
+        
+        # 轉換時間戳（秒 → ISO 格式）
+        filled_time = datetime.fromtimestamp(ts).isoformat() if ts else ""
+        
+        strategy_name = order.strategy_name
+        
+        self.logger.info(f"💰 成交價：{filled_price} (symbol: {symbol}, action: {action}, quantity: {quantity})")
+        
+        # 如果是平倉單，處理平倉邏輯
+        if order.is_close_order:
+            self.logger.info(f"🔄 處理平倉單：{order.strategy_id}")
+            result_msg = self.trading_tools._process_close_position(
+                strategy_id=order.strategy_id,
+                order=order,
+                filled_price=filled_price
+            )
+            self.logger.info(f"平倉結果：{result_msg}")
+        else:
+            # 開倉單：更新訂單成交價並建立部位
+            if filled_price > 0:
+                self.order_mgr.fill_order(order_id, filled_price)
+            else:
+                self.logger.warning(f"⚠️ 成交價為 0，使用最新市價")
+                latest_price = self.shioaji.get_latest_price(symbol)
+                if latest_price:
+                    self.order_mgr.fill_order(order_id, latest_price)
+                    filled_price = latest_price
+                else:
+                    self.logger.error("❌ 無法取得成交價")
+                    filled_price = 0
+            
+            # 建立部位（只在成交時建立）
+            if filled_price > 0:
+                self.position_mgr.open_position(
+                    strategy_id=order.strategy_id,
+                    strategy_name=order.strategy_name,
+                    symbol=order.symbol,
+                    direction=order.action,
+                    quantity=order.quantity,
+                    entry_price=filled_price,
+                    stop_loss_points=0,  # 可從訂單中取得（需擴充）
+                    take_profit_points=0,  # 可從訂單中取得（需擴充）
+                    signal_id=None  # 可從訂單中取得（需擴充）
+                )
+                self.logger.info(f"✅ 建立部位：{order.strategy_name} {order.action} {symbol} {quantity}口 @ {filled_price}")
+        
+        # 清理映射
+        self.order_mgr.remove_seqno_mapping(seqno)
+        
         self.notifier.send_order_notification({
             "status": "Filled",
-            "strategy_name": order.strategy_name,
-            "symbol": order.symbol,
-            "action": order.action,
-            "quantity": order.quantity,
-            "filled_price": order.filled_price,
-            "timestamp": order.filled_time
+            "strategy_name": strategy_name,
+            "symbol": symbol,
+            "action": action,
+            "quantity": quantity,
+            "filled_price": filled_price,
+            "timestamp": filled_time
         })
     
-    def _on_order_cancelled(self, order) -> None:
+    def _on_order_cancelled(self, order_id: str, msg: Dict) -> None:
         """取消回調"""
-        self.logger.info(f"訂單取消: {order.order_id}")
+        self.logger.info(f"訂單取消：{order_id}")
+        
+        order_info = msg.get("order", {})
+        status_info = msg.get("status", {})
         
         self.notifier.send_order_notification({
             "status": "Cancelled",
-            "strategy_name": order.strategy_name,
-            "symbol": order.symbol,
-            "action": order.action,
-            "quantity": order.quantity,
+            "strategy_name": "",
+            "symbol": order_info.get("code", ""),
+            "action": order_info.get("action", ""),
+            "quantity": status_info.get("cancel_quantity", 0),
             "timestamp": datetime.now().isoformat()
         })
     
+    async def _check_stale_orders(self) -> None:
+        """檢查並處理超時訂單"""
+        stale_timeout = self.config.trading.stale_order_timeout
+        if stale_timeout <= 0:
+            return
+        
+        stale_orders = self.order_mgr.get_stale_orders(stale_timeout)
+        
+        if not stale_orders:
+            return
+        
+        self.logger.warning(f"發現 {len(stale_orders)} 筆超時訂單")
+        
+        for order in stale_orders:
+            self.logger.info(f"處理超時訂單：{order.order_id} ({order.timestamp})")
+            
+            # 從回調管理器取得 trade 物件
+            trade = self.order_callback.get_trade(order.order_id)
+            
+            # 取消訂單
+            success = False
+            cancel_reason = ""
+            
+            if trade and not self.shioaji.skip_login:
+                # 實盤模式：呼叫 API 取消
+                try:
+                    success = self.shioaji.cancel_order(trade)
+                    if success:
+                        self.order_mgr.cancel_order(order.order_id)
+                        cancel_reason = f"超時未成交（>{stale_timeout}秒）"
+                        self.logger.info(f"✅ 已取消超時訂單：{order.order_id}")
+                except Exception as e:
+                    self.logger.error(f"取消訂單失敗：{e}")
+                    cancel_reason = f"取消失敗：{str(e)}"
+            else:
+                # 模擬模式或沒有 trade 物件：直接標記取消
+                self.order_mgr.cancel_order(order.order_id)
+                success = True
+                cancel_reason = f"超時未成交（>{stale_timeout}秒）"
+                self.logger.info(f"✅ 已標記取消超時訂單：{order.order_id}")
+            
+            # 發送通知
+            if success:
+                self.notifier.send_order_notification({
+                    "status": "Cancelled",
+                    "strategy_name": order.strategy_name,
+                    "symbol": order.symbol,
+                    "action": order.action,
+                    "quantity": order.quantity,
+                    "reason": cancel_reason,
+                    "timestamp": datetime.now().isoformat()
+                })
+            else:
+                self.notifier.send_alert(
+                    "取消訂單失敗",
+                    f"訂單 {order.order_id} 取消失敗：{cancel_reason}"
+                )
+    
     def _setup_tick_callback(self) -> None:
         """設置實盤 tick 回調"""
-        def on_tick(tick):
+        def on_tick(exchange, tick):
             try:
                 if hasattr(tick, 'code') and hasattr(tick, 'close'):
                     symbol = tick.code
@@ -299,6 +450,8 @@ class AITradingSystem:
                             volume=volume,
                             timestamp=timestamp
                         )
+                        
+                        self.shioaji.update_latest_price(symbol, price)
             except Exception as e:
                 self.logger.error(f"Tick 處理錯誤：{e}")
         
@@ -443,6 +596,9 @@ class AITradingSystem:
                 # 9. 檢查自動 LLM Review 排程
                 if self.auto_review_scheduler:
                     self.auto_review_scheduler.check_and_trigger()
+                
+                # 10. 檢查超時訂單
+                await self._check_stale_orders()
                 
             except Exception as e:
                 self.logger.error(f"主迴圈錯誤：{e}")
@@ -1157,7 +1313,20 @@ async def main():
     if args.simulate:
         system.shioaji.skip_login = True
     
-    # Web 界面（可選）
+    # 處理信號
+    def signal_handler(sig, frame):
+        print("\n收到停止信號，正在關閉...")
+        asyncio.create_task(system.stop())
+    
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
+    # 啟動
+    if not await system.initialize():
+        print("系統初始化失敗")
+        return
+    
+    # Web 界面（可選）- 延遲到 initialize() 之後確保 data_updater 已初始化
     web_config = getattr(system.config, 'web', None)
     if web_config and web_config.enabled:
         import threading
@@ -1166,8 +1335,9 @@ async def main():
         web_app = create_web_app(
             system.trading_tools, 
             system.llm_provider,
-            system.data_updater,  # 傳遞 DataUpdater
-            system.connection_mgr  # 傳遞連線管理器
+            system.data_updater,
+            system.connection_mgr,
+            system.strategy_runner
         )
         web_thread = threading.Thread(
             target=web_app.run,
@@ -1181,19 +1351,6 @@ async def main():
         web_thread.daemon = True
         web_thread.start()
         logger.info(f"Web 界面已啟動: http://{web_config.host}:{web_config.port}")
-    
-    # 處理信號
-    def signal_handler(sig, frame):
-        print("\n收到停止信號，正在關閉...")
-        asyncio.create_task(system.stop())
-    
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-    
-    # 啟動
-    if not await system.initialize():
-        print("系統初始化失敗")
-        return
     
     # Telegram 模式
     system.is_running = True

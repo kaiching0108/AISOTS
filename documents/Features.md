@@ -77,6 +77,7 @@ data_update:
 
 **運作機制**：
 - **實盤模式**：K-bar 從 Shioaji API 抓取 → 存入 SQLite → 供策略/回測使用
+- **實盤即時寫入**：實盤時，每分鐘 K 棒完成後自動寫入 SQLite（`RealtimeKBarAggregator`），圖表頁面每 15 秒輪詢更新，即時顯示最新走勢
 - **模擬模式**：生成模擬 K-bar → 不寫入 SQLite（保持純模擬）
 - **自動更新**：每日清晨檢查並補抓過期資料
 
@@ -97,42 +98,40 @@ df.resample('15min', closed='right', label='right')
 ```
 策略決策（on_bar）
     ↓
-strategy_runner 趨勢模擬價格 ←┐
-    ↓                          │
-get_contract().last_price ───┘ （相同價格來源）
+strategy_runner 趨勢模擬價格 / 即時報價 ←┐
+    ↓                                      │
+get_latest_price() ──────────────────────┘ （相同價格來源）
     ↓
 下單成交價 = 停損檢查價格
 ```
 
-**關鍵修復 - 模擬下單成交價格**：
-修正 `shioaji_client.place_order()` 中模擬下單的成交價格獲取邏輯：
+**價格快取機制（v0.5.1+）**：
+系統透過 `_latest_prices` 字典快取即時報價，提供統一的價格查詢介面：
 
 ```python
-# 修改前（問題）：
-'filled_price': price if price > 0 else 18500  # 固定價格 18500！
+# ShioajiClient 中的實現
+self._latest_prices: Dict[str, float] = {}
 
-# 修改後（修復）：
-if price > 0:
-    filled_price = price
-else:
-    filled_price = _get_mock_price(symbol)  # 動態價格
+def update_latest_price(self, symbol: str, price: float) -> None:
+    """從 Tick 回調更新最新價格"""
+    if price and price > 0:
+        self._latest_prices[symbol] = price
+
+def get_latest_price(self, symbol: str) -> Optional[float]:
+    """取得最新價格"""
+    return self._latest_prices.get(symbol)
 ```
 
-**修復說明**：
-- 原程式碼中 MockTrade.filled_price 固定為 18500，導致所有市價單成交價都是 18500
-- 修復後使用 `_get_mock_price()` 獲取 strategy_runner 的動態趨勢價格
-- 確保下單成交價與策略決策時的市場價格一致
-
 **實現方式**：
-- `shioaji_client.get_contract()` 在模擬模式下從 `strategy_runner` 獲取最新價格
-- `shioaji_client.place_order()` 中模擬下單使用相同動態價格機制
-- 確保策略決策、下單成交、停損檢查三者使用**相同價格來源**
-- 實盤模式無影響（直接使用 Shioaji API 真實行情）
+- Tick 回調 (`_setup_tick_callback`) 中呼叫 `update_latest_price()` 更新價格
+- 所有需要取得即時價格的程式碼使用 `get_latest_price()` 統一介面
+- 模擬模式 (`simulation: true`)：仍會訂閱報價以取得即時價格，只是下單時下虛擬單
+- 完全模擬模式 (`skip_login: true`)：跳過報價訂閱
 
 **價格獲取優先順序**：
-1. strategy_runner 動態價格（趨勢模擬）
+1. 報價快取 `_latest_prices`（即時價格）
 2. 現有部位進場價（避免誤觸停損）
-3. 基礎價格 18000（fallback）
+3. 合約參考價 `contract.reference`（開盤參考價）
 
 #### 回測K線趨勢模擬（v3.17.0+）
 
@@ -778,7 +777,84 @@ END OF REPORT
 
 > **注意**：系統預設使用市價單（MKT），確保快速成交。如需限價單，請在策略中明確指定。
 
-### 5.2 策略上下線控制
+### 5.2 Shioaji API 回調與成交價處理機制 (v0.5.2+)
+
+#### 5.2.1 成交回報處理流程
+
+系統透過 Shioaji 的 `_on_order_filled()` 回調處理實際成交資訊：
+
+| 回報類型 | 觸發時機 | 狀態 |
+|---------|---------|------|
+| 委託回報 | 訂單提交時 | "Submitted" |
+| 成交回報 | 訂單成交時 | "Filled" |
+
+**成交價提取（v0.5.2 修正）**：
+- 修正前（錯誤）：`filled_price = status_info.get("filled_price")`
+- 修正後（正確）：`filled_price = msg.get("price", 0)` — 成交價位於回報訊息的根層級，而非 status 資訊中
+
+**filled_price=0 的處理**：
+- 當市價單成交但回調中 price=0 時
+- Fallback：使用 `get_latest_price()` 作為成交價
+- 同時記錄警告日誌，供日後排查
+
+#### 5.2.2 seqno ↔ order_id 映射機制
+
+**問題背景**：
+- 內部訂單 ID 為 UUID 格式（如 `ord_b73e30b1`）
+- Shioaji 回調使用 6 位數 seqno（如 `003578`）
+- 需要正確映射才能將回調關聯到對應的訂單
+
+**OrderManager 映射方法**：
+
+| 方法 | 功能 |
+|------|------|
+| `submit_order(order_id, seqno)` | 下單時註冊映射關係 |
+| `get_order_by_seqno(seqno)` | 回調時根據 seqno 查詢 order_id |
+| `remove_seqno_mapping(seqno)` | 訂單完成後清理映射，避免記憶體洩漏 |
+
+**seqno 分配時機**：
+- `place_order()` 返回的 trade.order.seqno 為 None（尚未分配）
+- Shioaji 透過 `on_seqno_assigned` 回調分配 seqno
+- 系統使用 `timeout=5` 秒等待 seqno 分配完成
+
+#### 5.2.3 開倉 vs 平倉訂單處理
+
+**Order 類新增屬性**：
+- `is_close_order`（預設 False）— 區分開倉與平倉訂單
+
+**處理流程差異**：
+
+| 訂單類型 | 價格類型 | 成交處理 |
+|---------|---------|---------|
+| **開倉** | 限價單或市價單 | 等待 _on_order_filled() 回調 → 更新 filled_price |
+| **平倉** | 市價單（price=0）| 等待回調 → 調用 `_process_close_position(filled_price)` 計算真實 PnL |
+
+**平倉訂單特點**：
+- 使用市價單（`price=0`, `price_type="MKT"`）確保快速成交
+- 標記 `is_close_order=True` 供回調識別
+- 收到成交回調後，调用 `_process_close_position()` 使用真實成交價計算損益
+- 避免使用報價作為「假」成交價計算 PnL
+
+#### 5.2.4 離線模擬模式 (skip_login=True)
+
+當 `config.yaml` 中設定 `skip_login: true` 時：
+
+| 行為 | 說明 |
+|------|------|
+| 登入 | 跳過 Shioaji 登入 |
+| 報價 | 跳過報價訂閱 |
+| 下單 | Mock 訂單，不走真實 API |
+| 成交 | 立即自動成交，使用委託價或 `get_latest_price()` 作為 mock 成交價 |
+| 回調 | 不需要等待回調 |
+
+**與 simulation: true 的區別**：
+
+| 模式 | 登入 | 報價訂閱 | 下單 | 成交處理 |
+|------|------|---------|------|---------|
+| `simulation: true` | ✅ 實盤登入 | ✅ 訂閱即時報價 | 虛擬單 | 等待 Shioaji 回調 |
+| `skip_login: true` | ❌ 跳過 | ❌ 跳過 | Mock 單 | 立即成交 |
+
+### 5.3 策略上下線控制
 
 | 操作 | 說明 |
 |------|------|
@@ -809,7 +885,7 @@ END OF REPORT
 4. 停用舊策略
 5. 啟用新策略
 
-### 5.3 停損止盈
+### 5.4 停損止盈
 
 | 類型 | 觸發條件 | 動作 |
 |------|----------|------|
@@ -845,7 +921,7 @@ END OF REPORT
 
 每個策略可獨立設定停損/止盈點數。
 
-### 5.4 訂單管理
+### 5.5 訂單管理
 
 | 功能 | 說明 |
 |------|------|
@@ -1587,4 +1663,6 @@ auto_review:
 | 0.4.17 | 2026-03-07 | DataUpdater 優化：預先計算時間區間、強制往前推進、支援連假處理 |
 | 0.4.18 | 2026-03-08 | SQLite 數據完整性檢查：工作日缺口/交易時段異常檢測 |
 | 0.5.0 | 2026-03-09 | 異步重連機制：新增 handle_disconnect_async() 不阻塞事件迴圈；斷線期間暫停策略執行；Web UI 首頁顯示連線狀態 |
+| 0.5.1 | 2026-03-10 | 修復「實盤登入 + 下虛擬單」模式三個錯誤：(1) 報價訂閱被錯誤跳過 - simulation: true 時仍應訂閱報價；(2) contract.last_price 不存在 - 新增報價快取機制 _latest_prices 和 get_latest_price() 方法；(3) _on_order_filled 回調參數不匹配 - 修正為 (order_id, msg) |
+| 0.5.2 | 2026-03-11 | 修復成交價為 0：(1) 區分委託回報與成交回報；(2) 從成交回報 msg.get(\"price\") 提取成交價（而非 status_info.get(\"filled_price\")）；(3) on_seqno_assigned 回調解決回調先於 mapping 建立的問題；(4) 實作 seqno ↔ order_id 映射機制（OrderManager 新增方法）；(5) 新增 is_close_order 屬性區分開倉/平倉訂單；(6) 平倉改用市價單（price=0）等待回調獲取真實成交價計算 PnL；(7) place_order() 新增 timeout=5 秒等待 seqno 分配 |
 

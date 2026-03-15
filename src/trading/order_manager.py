@@ -14,6 +14,7 @@ class OrderManager:
     def __init__(self, workspace_dir: Path):
         self.store = OrderStore(workspace_dir)
         self.pending_orders: Dict[str, Order] = {}  # order_id -> Order
+        self.seqno_mapping: Dict[str, str] = {}  # seqno -> order_id
         self.order_timestamps: List[datetime] = []  # 用於頻率限制
         
         # 回調
@@ -30,9 +31,10 @@ class OrderManager:
         action: str,
         quantity: int,
         price: float = 0,
-        price_type: str = "MKT",
+        price_type: str = "LMT",
         order_type: str = "ROD",
-        reason: str = ""
+        reason: str = "",
+        is_close_order: bool = False
     ) -> Order:
         """建立訂單"""
         order = Order(
@@ -44,7 +46,8 @@ class OrderManager:
             price=price,
             price_type=price_type,
             order_type=order_type,
-            reason=reason
+            reason=reason,
+            is_close_order=is_close_order
         )
         
         # 儲存到待處理
@@ -67,14 +70,32 @@ class OrderManager:
         
         order.mark_submitted(seqno)
         
+        # 註冊 seqno 映射
+        if seqno:
+            self.seqno_mapping[seqno] = order_id
+            logger.debug(f"註冊映射：seqno={seqno} → order_id={order_id}")
+        
         # 更新儲存
         self.store.update_order_status(order_id, "Submitted")
         
         if self.on_order_submitted:
             self.on_order_submitted(order)
         
-        logger.info(f"訂單已提交: {order_id}, seqno: {seqno}")
+        logger.info(f"訂單已提交：{order_id}, seqno: {seqno}")
         return True
+    
+    def get_order_by_seqno(self, seqno: str) -> Optional[Order]:
+        """通過 seqno 查找訂單"""
+        order_id = self.seqno_mapping.get(seqno)
+        if order_id:
+            return self.pending_orders.get(order_id)
+        return None
+    
+    def remove_seqno_mapping(self, seqno: str) -> None:
+        """清理映射（成交/取消後調用）"""
+        if seqno in self.seqno_mapping:
+            deleted_id = self.seqno_mapping.pop(seqno)
+            logger.debug(f"清理映射：seqno={seqno} (order_id={deleted_id})")
     
     def fill_order(self, order_id: str, filled_price: float) -> Optional[Order]:
         """成交"""
@@ -185,3 +206,27 @@ class OrderManager:
             "pending": len(self.pending_orders),
             "today": datetime.now().strftime("%Y-%m-%d")
         }
+    
+    def get_stale_orders(self, timeout_seconds: int = 300) -> List[Order]:
+        """取得超時的訂單（Submitted 且超過超時時間）
+        
+        Args:
+            timeout_seconds: 超時秒數，預設 300 秒（5 分鐘）
+        
+        Returns:
+            超時訂單列表
+        """
+        from datetime import timedelta
+        stale_threshold = datetime.now() - timedelta(seconds=timeout_seconds)
+        
+        stale_orders = []
+        for order in self.pending_orders.values():
+            if order.status == "Submitted":
+                try:
+                    order_time = datetime.fromisoformat(order.timestamp)
+                    if order_time < stale_threshold:
+                        stale_orders.append(order)
+                except (ValueError, AttributeError):
+                    logger.warning(f"訂單時間格式錯誤：{order.timestamp}")
+        
+        return stale_orders

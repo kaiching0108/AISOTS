@@ -28,7 +28,8 @@ class StrategyRunner:
         risk_manager: RiskManager,
         llm_provider=None,
         notifier=None,
-        on_signal: Optional[Callable] = None
+        on_signal: Optional[Callable] = None,
+        trading_hours: Optional[Dict[str, str]] = None
     ):
         self.strategy_manager = strategy_manager
         self.position_manager = position_manager
@@ -38,6 +39,13 @@ class StrategyRunner:
         self.llm_generator = LLMGenerator(llm_provider)
         self.notifier = notifier
         self.on_signal = on_signal
+        
+        self.trading_hours = trading_hours or {
+            "day_start": "08:45",
+            "day_end": "13:45",
+            "night_start": "15:00",
+            "night_end": "05:00"
+        }
         
         self.market_data_cache: Dict[str, MarketData] = {}
         self.is_running = False
@@ -141,10 +149,8 @@ class StrategyRunner:
                 return False
         
         try:
-            contract = self.client.get_contract(strategy.symbol)
-            if contract:
-                self.client.subscribe_quote(contract)
-                logger.info(f"Subscribed to {strategy.symbol}")
+            self.client.subscribe_quote(strategy.symbol)
+            logger.info(f"Subscribed to {strategy.symbol}")
         except Exception as e:
             logger.error(f"Failed to subscribe to {strategy.symbol}: {e}")
         
@@ -432,8 +438,38 @@ class StrategyRunner:
         """取得市場數據"""
         return self.market_data_cache.get(symbol)
     
+    def is_within_trading_hours(self) -> bool:
+        """精確檢查當前是否在交易時段"""
+        from datetime import time
+        
+        now = datetime.now()
+        weekday = now.weekday()
+        
+        # 周六(5)和周日(6)不交易
+        if weekday >= 5:
+            return False
+        
+        now_time = now.time()
+        
+        day_start = time(*map(int, self.trading_hours["day_start"].split(":")))
+        day_end = time(*map(int, self.trading_hours["day_end"].split(":")))
+        night_start = time(*map(int, self.trading_hours["night_start"].split(":")))
+        night_end = time(*map(int, self.trading_hours["night_end"].split(":")))
+        
+        if day_start <= now_time <= day_end:
+            return True
+        
+        if now_time >= night_start or now_time <= night_end:
+            return True
+        
+        return False
+    
     async def run_all_strategies(self) -> None:
         """執行所有啟用的策略"""
+        if not self.is_within_trading_hours():
+            logger.debug("Non-trading hours, skipping strategy execution")
+            return
+        
         strategies = self.strategy_manager.get_enabled_strategies()
         
         for strategy in strategies:

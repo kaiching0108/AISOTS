@@ -233,7 +233,7 @@ User Command
 |------|------|
 | `shioaji_client.py` | Shioaji API 封裝，包含登入、下單、取得部位等 |
 | `connection.py` | 連線管理，自動重連機制 |
-| `order_callback.py` | 訂單/報價回調處理 |
+| `order_callback.py` | 訂單/報價回調處理，區分委託回報與成交回報 |
 
 ### 3.2 交易層 (src/trading/)
 
@@ -244,7 +244,7 @@ User Command
 | `position.py` | 部位類別 |
 | `position_manager.py` | 部位管理器，按策略分開追蹤 |
 | `order.py` | 訂單類別 |
-| `order_manager.py` | 訂單管理器 |
+| `order_manager.py` | 訂單管理器（含 seqno ↔ order_id 映射） |
 
 ### 3.3 引擎層 (src/engine/)
 
@@ -552,6 +552,25 @@ api.kbars(contract)  ← Shioaji API 取得真實 K 線
 2. 報價資料存入 PriceCache
 3. StrategyRunner 定時取得最新報價轉換為 K 棒
 4. 傳入 StrategyExecutor.execute_bar() 執行策略
+5. **Tick 回調更新價格快取**：`_latest_prices[symbol] = tick.close`
+
+#### 價格快取機制（v0.5.1+）
+
+系統透過 `ShioajiClient._latest_prices` 字典快取即時報價，提供統一的價格查詢介面：
+
+| 方法 | 檔案位置 | 說明 |
+|------|---------|------|
+| `update_latest_price()` | `shioaji_client.py` | 從 Tick 回調更新最新價格 |
+| `get_latest_price()` | `shioaji_client.py` | 取得特定 symbol 的最新價格 |
+
+**報價訂閱邏輯**：
+- `simulation: true`（實盤登入 + 下虛擬單）：**仍需訂閱報價**以取得即時價格
+- `skip_login: true`（完全模擬）：跳過報價訂閱
+- 只有 `skip_login` 會跳過報價訂閱，`simulation` 只影響下單是否為虛擬單
+
+**價格來源優先順序**：
+1. 報價快取 `_latest_prices`（即時價格）
+2. 合約參考價 `contract.reference`（開盤參考價，fallback）
 
 #### Timeframe 處理
 
@@ -1020,10 +1039,12 @@ cerebro.addanalyzer(bt.analyzers.AnnualReturn, _name='annual_return')
 | 0.4.17 | 2026-03-07 | DataUpdater 優化：預先計算時間區間、強制往前推進、支援連假處理 |
 | 0.4.18 | 2026-03-08 | SQLite 數據完整性檢查：工作日缺口/交易時段異常檢測 |
 | 0.5.0 | 2026-03-09 | 異步重連機制：新增 handle_disconnect_async() 不阻塞事件迴圈；斷線期間暫停策略執行；Web UI 首頁顯示連線狀態 |
+| 0.5.1 | 2026-03-10 | 修復「實盤登入 + 下虛擬單」模式三個錯誤：(1) 報價訂閱被錯誤跳過；(2) contract.last_price 不存在 - 新增報價快取；(3) _on_order_filled 回調參數不匹配 |
+| 0.5.2 | 2026-03-11 | 修復成交價為 0：(1) 區分委託回報與成交回報；(2) 從 msg.get(\"price\") 提取成交價；(3) 實作 seqno ↔ order_id 映射機制；(4) is_close_order 屬性區分開倉/平倉；(5) 平倉改用市價單等待回調；(6) 新增 OrderManager 映射管理方法 |
 
 ---
 
-n
+## 9. 技術支援
 ## 9. 技術支援
 
 

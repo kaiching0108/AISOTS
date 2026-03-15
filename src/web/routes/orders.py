@@ -1,5 +1,6 @@
 """Orders API Routes"""
 from flask import Blueprint, jsonify, request, current_app
+from datetime import datetime, timedelta
 
 bp = Blueprint('orders', __name__, url_prefix='/api/orders')
 
@@ -25,11 +26,42 @@ def get_orders():
         
         if strategy_id_filter:
             orders = order_mgr.get_orders_by_strategy(strategy_id_filter)
-        elif date_filter:
-            from datetime import datetime
+        elif date_filter and date_filter not in ['today', 'yesterday', 'week', 'month']:
+            # Legacy single date filter (YYYY-MM-DD format)
             all_orders = order_mgr.store.get_all_orders()
             orders = [o for o in all_orders if date_filter in o.get("timestamp", "")]
+        elif date_filter == 'yesterday':
+            # Yesterday: full day
+            now = datetime.now()
+            yesterday = now - timedelta(days=1)
+            start = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
+            end = yesterday.replace(hour=23, minute=59, second=59, microsecond=999999)
+            all_orders = order_mgr.store.get_all_orders()
+            orders = [
+                o for o in all_orders
+                if start.isoformat() <= o.get("timestamp", "") <= end.isoformat()
+            ]
+        elif date_filter == 'week':
+            # This week: from Monday to now
+            now = datetime.now()
+            start = now - timedelta(days=now.weekday())
+            start = start.replace(hour=0, minute=0, second=0, microsecond=0)
+            all_orders = order_mgr.store.get_all_orders()
+            orders = [
+                o for o in all_orders
+                if start.isoformat() <= o.get("timestamp", "")
+            ]
+        elif date_filter == 'month':
+            # This month: from 1st of month to now
+            now = datetime.now()
+            start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            all_orders = order_mgr.store.get_all_orders()
+            orders = [
+                o for o in all_orders
+                if start.isoformat() <= o.get("timestamp", "")
+            ]
         else:
+            # Default: today
             orders = order_mgr.get_today_orders()
         
         if status_filter:
