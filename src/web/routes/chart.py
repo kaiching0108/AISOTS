@@ -128,6 +128,7 @@ def get_kbars():
             volume.append({
                 "time": ts,
                 "value": int(vol),
+                "open": round(open_list[i], 2),
                 "close": round(close_list[i], 2)
             })
         
@@ -157,9 +158,13 @@ def get_signals():
     
     Query Parameters:
         strategy_id: 策略 ID
+        start_ts: 起始時間戳（可選，用於過濾）
+        end_ts: 結束時間戳（可選，用於過濾）
     """
     try:
         strategy_id = request.args.get('strategy_id')
+        start_ts = request.args.get('start_ts', type=int)
+        end_ts = request.args.get('end_ts', type=int)
         
         if not strategy_id:
             return jsonify({
@@ -186,9 +191,14 @@ def get_signals():
             
             try:
                 dt = datetime.fromisoformat(ts.replace('Z', '+00:00'))
-                # 轉換為 Unix timestamp (秒)
                 ts_sec = int(dt.timestamp())
             except:
+                continue
+            
+            # 前端傳入的 start_ts/end_ts 是毫秒，轉換成秒再比對
+            if start_ts is not None and ts_sec < (start_ts // 1000):
+                continue
+            if end_ts is not None and ts_sec > (end_ts // 1000):
                 continue
             
             signal_type = sig.get('signal', '')

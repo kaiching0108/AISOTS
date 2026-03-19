@@ -866,7 +866,9 @@ class ShioajiClient:
     
     def set_quote_callback(self, callback) -> None:
         """設置報價回調"""
-        self.api.quote.set_on_tick_fop_v1_callback(callback)
+        # bind=True 会让回调变成方法，需要 self 参数
+        # 使用 bind=False 让回调保持为普通函数
+        self.api.quote.set_on_tick_fop_v1_callback(callback, bind=False)
     
     def resubscribe_all_quotes(self) -> int:
         """重連後重新訂閱所有 symbol

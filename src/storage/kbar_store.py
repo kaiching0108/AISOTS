@@ -216,7 +216,7 @@ class KBarStore:
             
             # 將 timestamp 轉換為可讀字符串
             try:
-                ts_dt = datetime.fromtimestamp(ts)
+                ts_dt = datetime.utcfromtimestamp(ts)
                 ts_str = ts_dt.strftime("%Y-%m-%d %H:%M:%S")
             except:
                 ts_str = str(ts)

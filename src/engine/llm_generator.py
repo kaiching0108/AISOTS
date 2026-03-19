@@ -607,7 +607,7 @@ class LLMGenerator:
             
             for i in range(len(bars_data["ts"])):
                 bar = BarData(
-                    timestamp=datetime.fromtimestamp(bars_data["ts"][i]),
+                    timestamp=datetime.utcfromtimestamp(bars_data["ts"][i]),
                     symbol=symbol,
                     open=float(bars_data["open"][i]),
                     high=float(bars_data["high"][i]),

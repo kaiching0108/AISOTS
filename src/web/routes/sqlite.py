@@ -1,5 +1,6 @@
 """SQLite Data API Routes"""
 import asyncio
+from datetime import datetime, timedelta
 from flask import Blueprint, jsonify, current_app
 from loguru import logger
 
@@ -60,9 +61,10 @@ async def _fetch_missing_data(api):
             workday_check = db.check_workday_gaps(symbol)
             workday_gap_dates = workday_check.get("workday_gap_dates", [])
             
-            # 取得交易時段異常日期
+            # 取得每日數據不足日期
             trading_check = db.check_trading_hours_completeness(symbol)
-            suspicious_dates = [s["date"] for s in trading_check.get("suspicious_details", [])]
+            incomplete_dates = [s["date"] for s in trading_check.get("incomplete_details", [])]
+            suspicious_dates = incomplete_dates  # 保持變數名稱兼容
             
             # 合併所有需要處理的日期，並過濾已確認的日期
             all_dates = list(set(workday_gap_dates + suspicious_dates))
@@ -119,8 +121,7 @@ async def _fetch_missing_data(api):
                                 else:
                                     first_ts_sec = int(first_ts)
                                 
-                                from datetime import datetime
-                                actual_date = datetime.fromtimestamp(first_ts_sec).strftime("%Y-%m-%d")
+                                actual_date = datetime.utcfromtimestamp(first_ts_sec).strftime("%Y-%m-%d")
                                 
                                 if actual_date != gap_date:
                                     db.log_fetch_attempt(symbol, gap_date, 0, 'no_data')
@@ -129,8 +130,14 @@ async def _fetch_missing_data(api):
                                 else:
                                     db.insert_kbars(symbol, result_data)
                                     results["total_fetched"] += len(result_data.get("close", []))
-                                    db.log_fetch_attempt(symbol, gap_date, len(result_data["ts"]), 'success')
-                                    logger.info(f"補抓成功: {symbol} {gap_date}, 取得 {len(result_data['ts'])} 筆")
+                                    
+                                    # 获取当天日期（台北时间），当天不写入 success
+                                    today = datetime.now().strftime("%Y-%m-%d")
+                                    if gap_date == today:
+                                        logger.info(f"補抓成功: {symbol} {gap_date}, 取得 {len(result_data['ts'])} 筆 (當天不寫入 success)")
+                                    else:
+                                        db.log_fetch_attempt(symbol, gap_date, len(result_data["ts"]), 'success')
+                                        logger.info(f"補抓成功: {symbol} {gap_date}, 取得 {len(result_data['ts'])} 筆")
                         else:
                             db.log_fetch_attempt(symbol, gap_date, 0, 'no_data')
                             results["no_data_dates"].append(gap_date)

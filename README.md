@@ -22,6 +22,8 @@
 ```bash
 git clone https://github.com/kaiching0108/AISOTS.git
 cd AISOTS
+
+# Python 依賴
 pip install -r requirements.txt
 ```
 
@@ -70,17 +72,14 @@ web:
 # K-bar 數據更新服務
 data_update:
   enabled: true         # 開啟 K-bar 更新服務
-  update_time: "06:00" # 每日清晨抓取
   
   storage:              # 存儲配置
     max_records: 600000 # 最大儲存量：60 萬筆
   
-  initial_fetch:        # 初始抓取
-    daily_limit: 20000  # 初始每日上限
+  initial_fetch:        # 初始抓取（往歷史填補）
+    daily_limit: 20000  # 每日上限
     max_total: 300000   # 每個 symbol 最大總筆數
-  
-  daily:                # 每日定時抓取
-    daily_max: 10000    # 每日上限（所有 symbol 合計）
+  # 當日自動補抓：系統啟動或斷線重連後自動補抓當日 K-bars
 
 # 自動 LLM Review
 auto_review:
@@ -243,6 +242,15 @@ AISOTS/
 - backtesting.py
 - python-telegram-bot
 - LLM (Ollama/OpenAI/Anthropic)
+- Lightweight Charts 5.x（K 棒圖表，已預先打包至 `src/web/static/js/`）
+
+### 更新前端依賴（Lightweight Charts）
+
+如需更新 K 棒圖表庫版本：
+
+1. 到 [Lightweight Charts Releases](https://github.com/nicehash/nicehash-lightweight-charts/releases) 下載最新 standalone 版本
+2. 將下載的 `.js` 檔案命名為 `lightweight-charts.standalone.production.js`
+3. 覆蓋至 `src/web/static/js/lightweight-charts.standalone.production.js`
 
 ## 版本資訊
 

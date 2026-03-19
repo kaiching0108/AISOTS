@@ -1,6 +1,6 @@
 # AI Futures Trading System - Agent Guidelines
 
-**Version**: 0.5.0
+**Version**: 0.6.0
 
 ## Overview
 
@@ -200,6 +200,25 @@ kbars_data = {
 }
 ```
 
+### K-bar Data Fetching
+
+系統有兩種 K-bars 資料來源：
+
+1. **Initial Fetch（歷史補抓）**：系統啟動時，從最舊資料往更早時間填補歷史缺口（`source='initial'`）
+2. **Recovery（當日補抓）**：系統啟動或斷線重連後，從 Shioaji API 補抓當日 00:00 到 now 的所有 K-bars（`source='recovery'`）
+
+**觸發時機**：
+- 系統啟動時 → `check_and_update_on_login()` → `fetch_today()`
+- 斷線重連後 → `_on_reconnected()` → `fetch_today()`
+- 實盤 Realtime → `RealtimeKBarAggregator` 每分鐘寫入（`source='realtime'`）
+
+**Recovery 不消耗配額**：不寫入 `fetch_log`，直接覆蓋當日所有資料。
+
+### Shioaji API
+
+- `timeout` 參數單位為**毫秒**，預設 5000（5 秒）
+- 使用 `on_seqno_assigned` 回調解決 race condition
+
 ### LLM Strategy Generation
 
 - Generated strategies inherit from `TradingStrategy`
@@ -241,3 +260,8 @@ See `documents/`:
 - `System_Architecture.md` - Architecture
 - `User_Manual.md` - User manual
 - `Features.md` - Features
+
+## Shioaji - Taiwan's Leading Cross Platform Trading API
+See `Shioaji_Docs/`:
+- `llms.txt - Usage documentation Subject list 
+- `llms-full.txt - Full Detail Usage Document

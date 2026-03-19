@@ -463,7 +463,7 @@
                     <option value="TMF">TMF (微型台指)</option>
                 </select>
                 <select id="strategySelect" onchange="loadChart()">
-                    <option value="">全部訊號</option>
+                    <option value="">不顯示訊號</option>
                 </select>
                 <select id="limitSelect" onchange="loadChart()">
                     <option value="100">100 根</option>
@@ -473,15 +473,14 @@
                 </select>
                 <button class="btn btn-sm" onclick="loadChart()">🔄</button>
                 
-                <div class="timeframe-buttons" id="timeframeButtons">
-                    <button class="timeframe-btn" data-value="1m">1m</button>
-                    <button class="timeframe-btn" data-value="5m">5m</button>
-                    <button class="timeframe-btn active" data-value="15m">15m</button>
-                    <button class="timeframe-btn" data-value="30m">30m</button>
-                    <button class="timeframe-btn" data-value="60m">60m</button>
-                    <button class="timeframe-btn" data-value="1h">1h</button>
-                    <button class="timeframe-btn" data-value="1d">1d</button>
-                </div>
+              <div class="timeframe-buttons" id="timeframeButtons">
+                     <button class="timeframe-btn" data-value="1m">1m</button>
+                     <button class="timeframe-btn" data-value="5m">5m</button>
+                     <button class="timeframe-btn active" data-value="15m">15m</button>
+                     <button class="timeframe-btn" data-value="30m">30m</button>
+                     <button class="timeframe-btn" data-value="1h">1h</button>
+                     <button class="timeframe-btn" data-value="1d">1d</button>
+                 </div>
             </div>
         </div>
         
@@ -513,9 +512,53 @@
 
 {% block extra_js %}
 <script>
-let chart, candlestickSeries, volumeSeries;
+let chart, candlestickSeries, volumeSeries, seriesMarkers = null;
 let currentTimeframe = '15m';
 let cachedStatusData = null;
+
+const CHART_FILTER_KEY = 'chartFilters_dashboard';
+
+function saveChartFilters() {
+    const filters = {
+        symbol: document.getElementById('symbolSelect').value,
+        limit: document.getElementById('limitSelect').value,
+        timeframe: currentTimeframe,
+        strategy: document.getElementById('strategySelect').value
+    };
+    localStorage.setItem(CHART_FILTER_KEY, JSON.stringify(filters));
+}
+
+function loadChartFilters() {
+    try {
+        const saved = localStorage.getItem(CHART_FILTER_KEY);
+        if (!saved) return;
+        const filters = JSON.parse(saved);
+        if (filters.symbol) document.getElementById('symbolSelect').value = filters.symbol;
+        if (filters.limit) document.getElementById('limitSelect').value = filters.limit;
+        if (filters.timeframe) {
+            currentTimeframe = filters.timeframe;
+            document.querySelectorAll('.timeframe-btn').forEach(b => {
+                b.classList.toggle('active', b.dataset.value === filters.timeframe);
+            });
+        }
+    } catch (e) {
+        console.error('載入篩選條件失敗:', e);
+    }
+}
+
+function restoreStrategyFilter() {
+    try {
+        const saved = localStorage.getItem(CHART_FILTER_KEY);
+        if (!saved) return;
+        const filters = JSON.parse(saved);
+        if (filters.strategy) {
+            const select = document.getElementById('strategySelect');
+            if (select.querySelector(`option[value="${filters.strategy}"]`)) {
+                select.value = filters.strategy;
+            }
+        }
+    } catch (e) { /* ignore */ }
+}
 
 function initChart() {
     const container = document.getElementById('chartContainer');
@@ -525,6 +568,9 @@ function initChart() {
         container.innerHTML = '<div class="empty-state">圖表庫載入失敗，請刷新頁面</div>';
         return;
     }
+    
+    // 调试：检查 v5 API
+    console.log('createSeriesMarkers:', typeof LightweightCharts.createSeriesMarkers);
     
     chart = LightweightCharts.createChart(container, {
         width: container.clientWidth,
@@ -546,16 +592,16 @@ function initChart() {
         timeScale: { borderColor: '#30363d', timeVisible: true, secondsVisible: false },
     });
     
-    candlestickSeries = chart.addCandlestickSeries({
-        upColor: '#3fb950',
-        downColor: '#f85149',
-        borderUpColor: '#3fb950',
-        borderDownColor: '#f85149',
-        wickUpColor: '#3fb950',
-        wickDownColor: '#f85149',
+    candlestickSeries = chart.addSeries(LightweightCharts.CandlestickSeries, {
+        upColor: '#f85149',
+        downColor: '#3fb950',
+        borderUpColor: '#f85149',
+        borderDownColor: '#3fb950',
+        wickUpColor: '#f85149',
+        wickDownColor: '#3fb950',
     });
     
-    volumeSeries = chart.addHistogramSeries({
+    volumeSeries = chart.addSeries(LightweightCharts.HistogramSeries, {
         color: '#26a69a',
         priceFormat: { type: 'volume' },
         priceScaleId: '',
@@ -571,12 +617,14 @@ function initChart() {
             document.querySelectorAll('.timeframe-btn').forEach(b => b.classList.remove('active'));
             this.classList.add('active');
             currentTimeframe = this.dataset.value;
+            saveChartFilters();
             loadChart();
         });
     });
 }
 
-async function loadChart() {
+   async function loadChart() {
+    saveChartFilters();
     if (!chart || !candlestickSeries) return;
     
     const symbol = document.getElementById('symbolSelect').value;
@@ -593,42 +641,86 @@ async function loadChart() {
             document.getElementById('chartInfo').textContent = '無資料';
             candlestickSeries.setData([]);
             volumeSeries.setData([]);
+            if (seriesMarkers) {
+                seriesMarkers.setMarkers([]);
+            }
             return;
         }
         
-        candlestickSeries.setData(res.data.candlestick);
+        const kbars = res.data.candlestick;
+        const startTs = kbars[0]?.time || 0;
+        const endTs = kbars[kbars.length - 1]?.time || 0;
+        
+        candlestickSeries.setData(kbars);
         
         const volData = res.data.volume.map(v => ({
             time: v.time,
             value: v.value,
-            color: v.close >= v.open ? 'rgba(63, 185, 80, 0.5)' : 'rgba(248, 81, 73, 0.5)'
+            color: v.close >= v.open ? 'rgba(248, 81, 73, 0.5)' : 'rgba(63, 185, 80, 0.5)'
         }));
         volumeSeries.setData(volData);
         
-        document.getElementById('chartInfo').textContent = `${symbol} | ${currentTimeframe} | ${res.data.candlestick.length} 根`;
+        document.getElementById('chartInfo').textContent = `${symbol} | ${currentTimeframe} | ${kbars.length} 根`;
         
-        if (strategyId) {
-            const signalsRes = await apiCall(`/api/chart/signals?strategy_id=${strategyId}`);
-            if (signalsRes.success && signalsRes.data?.markers) {
-                candlestickSeries.setMarkers(signalsRes.data.markers);
+        const signalsStartTs = startTs * 1000;
+        const signalsEndTs = endTs * 1000;
+        
+        if (typeof LightweightCharts.createSeriesMarkers === 'function') {
+            if (strategyId) {
+                const signalsRes = await apiCall(`/api/chart/signals?strategy_id=${strategyId}&start_ts=${signalsStartTs}&end_ts=${signalsEndTs}`);
+                if (signalsRes.success && signalsRes.data?.markers) {
+                    if (seriesMarkers) {
+                        seriesMarkers.setMarkers([]);
+                    }
+                    seriesMarkers = LightweightCharts.createSeriesMarkers(
+                        candlestickSeries,
+                        signalsRes.data.markers
+                    );
+                }
+            } else {
+                const strategiesRes = await apiCall('/api/chart/strategies');
+                if (strategiesRes.success && strategiesRes.data) {
+                    const enabledIds = strategiesRes.data.filter(s => s.enabled).map(s => s.id);
+                    let allMarkers = [];
+                    for (const sid of enabledIds) {
+                        const sr = await apiCall(`/api/chart/signals?strategy_id=${sid}&start_ts=${signalsStartTs}&end_ts=${signalsEndTs}`);
+                        if (sr.success && sr.data?.markers) {
+                            allMarkers = allMarkers.concat(sr.data.markers);
+                        }
+                    }
+                    if (seriesMarkers) {
+                        seriesMarkers.setMarkers([]);
+                    }
+                    seriesMarkers = LightweightCharts.createSeriesMarkers(
+                        candlestickSeries,
+                        allMarkers
+                    );
+                }
             }
         } else {
-            const strategiesRes = await apiCall('/api/chart/strategies');
-            if (strategiesRes.success && strategiesRes.data) {
-                const enabledIds = strategiesRes.data.filter(s => s.enabled).map(s => s.id);
-                let allMarkers = [];
-                for (const sid of enabledIds) {
-                    const sr = await apiCall(`/api/chart/signals?strategy_id=${sid}`);
-                    if (sr.success && sr.data?.markers) {
-                        allMarkers = allMarkers.concat(sr.data.markers);
-                    }
+            if (strategyId) {
+                const signalsRes = await apiCall(`/api/chart/signals?strategy_id=${strategyId}&start_ts=${signalsStartTs}&end_ts=${signalsEndTs}`);
+                if (signalsRes.success && signalsRes.data?.markers) {
+                    candlestickSeries.setMarkers(signalsRes.data.markers);
                 }
-                candlestickSeries.setMarkers(allMarkers);
+            } else {
+                const strategiesRes = await apiCall('/api/chart/strategies');
+                if (strategiesRes.success && strategiesRes.data) {
+                    const enabledIds = strategiesRes.data.filter(s => s.enabled).map(s => s.id);
+                    let allMarkers = [];
+                    for (const sid of enabledIds) {
+                        const sr = await apiCall(`/api/chart/signals?strategy_id=${sid}&start_ts=${signalsStartTs}&end_ts=${signalsEndTs}`);
+                        if (sr.success && sr.data?.markers) {
+                            allMarkers = allMarkers.concat(sr.data.markers);
+                        }
+                    }
+                    candlestickSeries.setMarkers(allMarkers);
+                }
             }
         }
-    } catch (e) {
+       } catch (e) {
         console.error('載入圖表失敗:', e);
-        document.getElementById('chartInfo').textContent = '載入失敗';
+      document.getElementById('chartInfo').textContent = '載入失敗：' + e.message;
     }
 }
 
@@ -636,7 +728,7 @@ async function loadStrategies() {
     try {
         const res = await apiCall('/api/chart/strategies');
         const select = document.getElementById('strategySelect');
-        select.innerHTML = '<option value="">全部訊號</option>';
+        select.innerHTML = '<option value="">不顯示訊號</option>';
         
         if (res.success && res.data) {
             res.data.filter(s => s.enabled).forEach(s => {
@@ -649,6 +741,7 @@ async function loadStrategies() {
     } catch (e) {
         console.error('載入策略失敗:', e);
     }
+    restoreStrategyFilter();
 }
 
 async function loadSystemStatus() {
@@ -768,7 +861,7 @@ async function loadTradeLogs() {
                         <div class="log-strategy">${log.strategy_name || log.strategy_id}</div>
                         <div class="log-message">${log.message}</div>
                     </div>
-                    <span class="log-time">${log.formatted_time?.split(' ')[1] || ''}</span>
+                    <span class="log-time">${log.formatted_time || ''}</span>
                     <span class="log-badge ${badge}">${log.event_type_display || log.event_type}</span>
                 </div>
             `;
@@ -821,9 +914,9 @@ function renderSqliteSection(status) {
                                 📆 工作日缺口: ${workdayGaps} 天
                             </span>
                         </div>
-                        <div style="font-size: 11px; margin-top: 2px;">
+                       <div style="font-size: 11px; margin-top: 2px;">
                             <span style="color: ${tradingSuspicious > 0 ? 'var(--btn-warning)' : 'var(--success)'};">
-                                ⏰ 交易時段異常: ${tradingSuspicious} 天
+                                ⏰ 每日數據不足：${tradingSuspicious} 天
                             </span>
                         </div>
                     </div>
@@ -871,6 +964,7 @@ document.addEventListener('DOMContentLoaded', function() {
     setTimeout(function() {
         initChart();
         loadStrategies();
+        loadChartFilters();
         loadChart();
         loadSystemStatus();
         loadTradeLogs();

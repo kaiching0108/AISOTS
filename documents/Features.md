@@ -57,14 +57,8 @@ python main.py --simulate
 ```yaml
 data_update:
   enabled: true            # 開啟 K-bar 更新服務
-  update_time: "06:00"    # 每日清晨抓取
-  
-  daily:                   # 每日定時抓取
-    records_per_call: 1000
-    api_calls_per_day: 10
-    daily_max: 10000       # 每日上限：2 萬筆（所有 symbol 合計）
-  
-  initial_fetch:          # 系統啟動時抓取
+   
+  initial_fetch:          # 系統啟動時抓取（往歷史填補）
     records_per_call: 1000
     api_calls_per_day: 20
     daily_limit: 20000     # 初始每日上限：2 萬筆
@@ -79,7 +73,7 @@ data_update:
 - **實盤模式**：K-bar 從 Shioaji API 抓取 → 存入 SQLite → 供策略/回測使用
 - **實盤即時寫入**：實盤時，每分鐘 K 棒完成後自動寫入 SQLite（`RealtimeKBarAggregator`），圖表頁面每 15 秒輪詢更新，即時顯示最新走勢
 - **模擬模式**：生成模擬 K-bar → 不寫入 SQLite（保持純模擬）
-- **自動更新**：每日清晨檢查並補抓過期資料
+- **當日自動補抓**：系統啟動或斷線重連後，自動從 Shioaji API 補抓當日 00:00 至 now 的 K-bars
 
 #### Phase 7: K-bar 右側對齊修復 (v4.9.0+)
 
@@ -230,12 +224,15 @@ for i in range(count):
 - **模擬模式（--simulate）**：使用模擬數據，**不寫入 SQLite 緩存**
 
 **數據更新機制**：
-1. **每日定時更新**（通過 Flask-APScheduler）
-   - 時間：每天凌晨 6:00 AM
-   - 抓取前一天 K 棒數據（daily_max: 10,000 筆，所有 symbol 合計）
+1. **當日自動補抓**（Recovery）
+   - 觸發時機：系統啟動時、斷線重連後
+   - 抓取當日 00:00 至 now 的 K-bars（`source='recovery'`）
+   - 不寫入 `fetch_log`，不消耗配額
+   - 由 `DataUpdater.fetch_today()` 執行
 
-2. **系統啟動檢查**
-   - 登錄 Shioaji 時自動檢查數據完整性
+2. **歷史自動補抓**（Initial Fetch）
+   - 觸發時機：系統啟動時（登入後）
+   - 從最舊資料往更早時間填補歷史缺口（`source='initial'`）
    - 任一 symbol 的 1m 筆數 < 300,000 → 啟動抓取
    - 當日限制：daily_limit = 20,000 筆（所有 symbol 合計）
 
@@ -243,13 +240,7 @@ for i in range(count):
 ```yaml
 data_update:
   enabled: true
-  update_time: "06:00"
-  
-  daily:
-    records_per_call: 1000
-    api_calls_per_day: 10
-    daily_max: 10000
-    
+   
   initial_fetch:
     records_per_call: 1000
     api_calls_per_day: 20

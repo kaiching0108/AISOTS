@@ -66,8 +66,19 @@ class RealtimeKBarAggregator:
         Returns:
             如果生成了新的 K-bar，返回 K-bar 数据；否则返回 None
         """
+        # 调试日志：检查 timestamp 类型
+        logger.debug(f"收到 tick: {symbol} price={price} volume={volume} timestamp={timestamp} type={type(timestamp)}")
+        
+        # 如果 timestamp 是字符串，尝试解析
+        if isinstance(timestamp, str):
+            try:
+                timestamp = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+            except Exception as e:
+                logger.error(f"解析 timestamp 失败: {e}")
+                return None
+        
         current_minute = timestamp.replace(second=0, microsecond=0)
-        current_ts = int(current_minute.timestamp())
+        current_ts = int(current_minute.timestamp()) + 8 * 3600
         
         kbar = self._current_kbars[symbol]
         
@@ -92,6 +103,8 @@ class RealtimeKBarAggregator:
             return None
         
         # 分钟变化，完成当前 K-bar
+        logger.info(f"跨分钟触发: {symbol} {kbar['start_ts']} -> {current_ts}")
+        
         completed_kbar = {
             'symbol': symbol,
             'ts': kbar['start_ts'],
@@ -120,9 +133,13 @@ class RealtimeKBarAggregator:
                     'close': [completed_kbar['close']],
                     'volume': [completed_kbar['volume']],
                 }
-                self._kbar_db.insert_kbars(symbol, kbars_data, source='realtime')
+                logger.info(f"准备写入 realtime K-bar: {symbol} ts={completed_kbar['ts']}")
+                inserted = self._kbar_db.insert_kbars(symbol, kbars_data, source='realtime')
+                logger.info(f"写入 realtime K-bar 完成: {symbol} inserted={inserted}")
             except Exception as e:
                 logger.error(f"写入 K-bar 到 SQLite 失败: {e}")
+        else:
+            logger.warning("kbar_db 未初始化，跳过写入")
         
         # 重置当前 K-bar
         kbar.clear()

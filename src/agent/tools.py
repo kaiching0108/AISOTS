@@ -2308,14 +2308,14 @@ set_goal {strategy_id} <目標金額> <單位>
                     else:
                         ts_sec = int(ts)
                     from datetime import datetime
-                    latest_date = datetime.fromtimestamp(ts_sec).strftime("%Y-%m-%d")
+                    latest_date = datetime.utcfromtimestamp(ts_sec).strftime("%Y-%m-%d")
                 
                 # 检查完整性
                 workday_check = self.api.kbar_db.check_workday_gaps(symbol)
                 trading_hours_check = self.api.kbar_db.check_trading_hours_completeness(symbol)
                 
-                # 计算总天数（使用交易时段平均笔数）
-                avg_count = trading_hours_check.get("avg_count", 830)
+                # 计算总天数（使用 1140 笔/天作为标准）
+                avg_count = 1140  # 每完整交易日标准笔数
                 total_days = round(count / avg_count) if avg_count > 0 else 0
                 
                 sqlite_data[symbol] = {
@@ -2324,8 +2324,7 @@ set_goal {strategy_id} <目標金額> <單位>
                     "latest_date": latest_date,
                     "workday_gaps": workday_check.get("workday_gaps", 0),
                     "weekend_gaps": workday_check.get("weekend_gaps", 0),
-                    "trading_hours_suspicious": trading_hours_check.get("suspicious_days", 0),
-                    "trading_hours_avg": trading_hours_check.get("avg_count", 0),
+                    "trading_hours_suspicious": trading_hours_check.get("incomplete_days", 0),
                 }
             
             total = sum(data["count"] for data in sqlite_data.values())

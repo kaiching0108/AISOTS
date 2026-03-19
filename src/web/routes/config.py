@@ -71,8 +71,6 @@ def get_config():
             },
             "data_update": {
                 "enabled": config.get("data_update", {}).get("enabled", True),
-                "update_time": config.get("data_update", {}).get("update_time", "06:00"),
-                "daily": config.get("data_update", {}).get("daily", {}),
                 "initial_fetch": config.get("data_update", {}).get("initial_fetch", {}),
                 "storage": config.get("data_update", {}).get("storage", {}),
             },
@@ -186,10 +184,6 @@ def update_config():
             current = config.get("data_update", {})
             if "enabled" in data_update:
                 current["enabled"] = data_update["enabled"]
-            if "update_time" in data_update:
-                current["update_time"] = data_update["update_time"]
-            if "daily" in data_update:
-                current["daily"] = data_update["daily"]
             if "initial_fetch" in data_update:
                 current["initial_fetch"] = data_update["initial_fetch"]
             if "storage" in data_update:

@@ -10,9 +10,7 @@ build/
 
 # Testing
 .pytest_cache/
-.coverage
-htmlcov/
-tests/
+.htmlcov/
 
 # Environment
 .env
@@ -31,3 +29,4 @@ workspace/
 # OS
 .DS_Store
 Thumbs.db
+

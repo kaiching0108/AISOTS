@@ -96,7 +96,7 @@ class StrategyRunner:
             for i in range(len(bars["ts"])):
                 self.update_market_data(
                     strategy.symbol,
-                    datetime.fromtimestamp(bars["ts"][i]),
+                    datetime.utcfromtimestamp(bars["ts"][i]),
                     float(bars["open"][i]),
                     float(bars["high"][i]),
                     float(bars["low"][i]),

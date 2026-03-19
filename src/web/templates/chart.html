@@ -107,7 +107,6 @@
             <option value="5m">5 分鐘</option>
             <option value="15m" selected>15 分鐘</option>
             <option value="30m">30 分鐘</option>
-            <option value="60m">60 分鐘</option>
             <option value="1h">1 小時</option>
             <option value="1d">1 日</option>
         </select>
@@ -149,7 +148,46 @@
 console.log('LightweightCharts loaded:', typeof LightweightCharts);
 console.log('createChart:', typeof LightweightCharts?.createChart);
 
-let chart, candlestickSeries, volumeSeries;
+let chart, candlestickSeries, volumeSeries, seriesMarkers = null;
+
+const CHART_FILTER_KEY = 'chartFilters_chart';
+
+function saveChartFilters() {
+    const filters = {
+        symbol: document.getElementById('symbolSelect').value,
+        timeframe: document.getElementById('timeframeSelect').value,
+        limit: document.getElementById('limitSelect').value,
+        strategy: document.getElementById('strategySelect').value
+    };
+    localStorage.setItem(CHART_FILTER_KEY, JSON.stringify(filters));
+}
+
+function loadChartFilters() {
+    try {
+        const saved = localStorage.getItem(CHART_FILTER_KEY);
+        if (!saved) return;
+        const filters = JSON.parse(saved);
+        if (filters.symbol) document.getElementById('symbolSelect').value = filters.symbol;
+        if (filters.timeframe) document.getElementById('timeframeSelect').value = filters.timeframe;
+        if (filters.limit) document.getElementById('limitSelect').value = filters.limit;
+    } catch (e) {
+        console.error('載入篩選條件失敗:', e);
+    }
+}
+
+function restoreStrategyFilter() {
+    try {
+        const saved = localStorage.getItem(CHART_FILTER_KEY);
+        if (!saved) return;
+        const filters = JSON.parse(saved);
+        if (filters.strategy) {
+            const select = document.getElementById('strategySelect');
+            if (select.querySelector(`option[value="${filters.strategy}"]`)) {
+                select.value = filters.strategy;
+            }
+        }
+    } catch (e) { /* ignore */ }
+}
 
 function initChart() {
     const container = document.getElementById('chart-container');
@@ -159,6 +197,10 @@ function initChart() {
         container.innerHTML = '<div style="color: red; padding: 20px;">圖表庫載入失敗，請刷新頁面</div>';
         return;
     }
+    
+    // 检查 v5 API
+    console.log('LightweightCharts:', LightweightCharts);
+    console.log('createSeriesMarkers:', typeof LightweightCharts.createSeriesMarkers);
     
     chart = LightweightCharts.createChart(container, {
         width: container.clientWidth,
@@ -194,16 +236,16 @@ function initChart() {
         },
     });
 
-    candlestickSeries = chart.addCandlestickSeries({
-        upColor: '#3fb950',
-        downColor: '#f85149',
-        borderUpColor: '#3fb950',
-        borderDownColor: '#f85149',
-        wickUpColor: '#3fb950',
-        wickDownColor: '#f85149',
+    candlestickSeries = chart.addSeries(LightweightCharts.CandlestickSeries, {
+        upColor: '#f85149',
+        downColor: '#3fb950',
+        borderUpColor: '#f85149',
+        borderDownColor: '#3fb950',
+        wickUpColor: '#f85149',
+        wickDownColor: '#3fb950',
     });
 
-    volumeSeries = chart.addHistogramSeries({
+    volumeSeries = chart.addSeries(LightweightCharts.HistogramSeries, {
         color: '#26a69a',
         priceFormat: { type: 'volume' },
         priceScaleId: '',
@@ -212,14 +254,20 @@ function initChart() {
         scaleMargins: { top: 0.8, bottom: 0 },
     });
 
-    candlestickSeries.setMarkers([]);
+    // v5 使用 createSeriesMarkers 插件，v4 使用 setMarkers
+    if (typeof LightweightCharts.createSeriesMarkers === 'function') {
+        seriesMarkers = LightweightCharts.createSeriesMarkers(candlestickSeries, []);
+    } else {
+        candlestickSeries.setMarkers([]);
+    }
 
     window.addEventListener('resize', () => {
         chart.resize(container.clientWidth, 600);
     });
 }
 
-async function loadChart() {
+  async function loadChart() {
+    saveChartFilters();
     if (!chart || !candlestickSeries) {
         console.error('Chart not initialized');
         document.getElementById('chartCount').textContent = '圖表初始化失敗';
@@ -253,38 +301,71 @@ async function loadChart() {
         console.log('Chart response:', res);
         
         if (!res.success) {
-            document.getElementById('chartCount').textContent = '錯誤: ' + (res.error || 'Unknown error');
+            document.getElementById('chartCount').textContent = '錯誤：' + (res.error || 'Unknown error');
+            if (seriesMarkers) {
+                seriesMarkers.setMarkers([]);
+            }
             return;
         }
         
         if (res.data && res.data.candlestick && res.data.candlestick.length > 0) {
-            candlestickSeries.setData(res.data.candlestick);
+            const kbars = res.data.candlestick;
+            const startTs = kbars[0]?.time || 0;
+            const endTs = kbars[kbars.length - 1]?.time || 0;
+            
+            candlestickSeries.setData(kbars);
             
             const volData = res.data.volume.map(v => ({
                 time: v.time,
                 value: v.value,
-                color: v.close >= (res.data.candlestick.find(c => c.time === v.time)?.open || v.close) ? 'rgba(63, 185, 80, 0.5)' : 'rgba(248, 81, 73, 0.5)'
+                color: v.close >= (kbars.find(c => c.time === v.time)?.open || v.close) ? 'rgba(248, 81, 73, 0.5)' : 'rgba(63, 185, 80, 0.5)'
             }));
             volumeSeries.setData(volData);
 
-            document.getElementById('chartCount').textContent = `${res.data.candlestick.length} 根`;
+            document.getElementById('chartCount').textContent = `${kbars.length} 根`;
 
-            if (strategyId) {
-                const signalsRes = await apiCall(`/api/chart/signals?strategy_id=${strategyId}`);
-                if (signalsRes.success && signalsRes.data && signalsRes.data.markers) {
-                    candlestickSeries.setMarkers(signalsRes.data.markers);
+            const signalsStartTs = startTs * 1000;
+            const signalsEndTs = endTs * 1000;
+
+            if (typeof LightweightCharts.createSeriesMarkers === 'function') {
+                if (strategyId) {
+                    const signalsRes = await apiCall(`/api/chart/signals?strategy_id=${strategyId}&start_ts=${signalsStartTs}&end_ts=${signalsEndTs}`);
+                    if (signalsRes.success && signalsRes.data && signalsRes.data.markers) {
+                        if (seriesMarkers) {
+                            seriesMarkers.setMarkers([]);
+                        }
+                        seriesMarkers = LightweightCharts.createSeriesMarkers(
+                            candlestickSeries,
+                            signalsRes.data.markers
+                        );
+                    }
+                } else {
+                    if (seriesMarkers) {
+                        seriesMarkers.setMarkers([]);
+                    }
+                    seriesMarkers = null;
                 }
             } else {
-                candlestickSeries.setMarkers([]);
+                if (strategyId) {
+                    const signalsRes = await apiCall(`/api/chart/signals?strategy_id=${strategyId}&start_ts=${signalsStartTs}&end_ts=${signalsEndTs}`);
+                    if (signalsRes.success && signalsRes.data && signalsRes.data.markers) {
+                        candlestickSeries.setMarkers(signalsRes.data.markers);
+                    }
+                } else {
+                    candlestickSeries.setMarkers([]);
+                }
             }
         } else {
             document.getElementById('chartCount').textContent = '無資料';
             candlestickSeries.setData([]);
             volumeSeries.setData([]);
+            if (seriesMarkers) {
+                seriesMarkers.setMarkers([]);
+            }
         }
-    } catch (e) {
+   } catch (e) {
         console.error('載入圖表失敗:', e);
-        document.getElementById('chartCount').textContent = '載入失敗';
+        document.getElementById('chartCount').textContent = '載入失敗：' + e.message;
     }
 }
 
@@ -311,6 +392,7 @@ async function loadStrategies() {
     } catch (e) {
         console.error('載入策略失敗:', e);
     }
+    restoreStrategyFilter();
 }
 
 document.addEventListener('DOMContentLoaded', function() {
@@ -318,6 +400,7 @@ document.addEventListener('DOMContentLoaded', function() {
     setTimeout(function() {
         initChart();
         loadStrategies();
+        loadChartFilters();
         loadChart();
     }, 100);
     

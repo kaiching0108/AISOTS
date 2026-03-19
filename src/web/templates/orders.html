@@ -54,13 +54,13 @@
         font-size: 12px;
         font-weight: bold;
     }
-    .status-Pending { background: #fff3cd; color: #856404; }
-    .status-Submitted { background: #cce5ff; color: #004085; }
-    .status-Filled { background: #d4edda; color: #155724; }
-    .status-Cancelled { background: #f8d7da; color: #721c24; }
-    .status-Rejected { background: #f8d7da; color: #721c24; }
-    .action-buy { color: #e74c3c; font-weight: bold; }
-    .action-sell { color: #27ae60; font-weight: bold; }
+    .status-Pending { background: rgba(210,153,34,0.15); color: var(--btn-warning); }
+    .status-Submitted { background: rgba(88,166,255,0.15); color: var(--accent-blue); }
+    .status-Filled { background: rgba(63,185,80,0.15); color: var(--success); }
+    .status-Cancelled { background: rgba(248,81,73,0.10); color: var(--text-secondary); }
+    .status-Rejected { background: rgba(248,81,73,0.15); color: var(--danger); }
+    .action-buy { color: var(--danger); font-weight: bold; }
+    .action-sell { color: var(--success); font-weight: bold; }
     table {
         width: 100%;
         border-collapse: collapse;
@@ -117,15 +117,15 @@
             <div class="label">總訂單</div>
         </div>
         <div class="stats-item">
-            <div class="count" id="statFilled" style="color: #27ae60;">0</div>
+            <div class="count" id="statFilled" style="color: var(--success);">0</div>
             <div class="label">已成交</div>
         </div>
         <div class="stats-item">
-            <div class="count" id="statPending" style="color: #f39c12;">0</div>
+            <div class="count" id="statPending" style="color: var(--btn-warning);">0</div>
             <div class="label">待處理</div>
         </div>
         <div class="stats-item">
-            <div class="count" id="statCancelled" style="color: #95a5a6;">0</div>
+            <div class="count" id="statCancelled" style="color: var(--text-secondary);">0</div>
             <div class="label">已取消</div>
         </div>
     </div>

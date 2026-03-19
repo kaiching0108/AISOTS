@@ -155,7 +155,7 @@ class MarketDataService:
             result = []
             for i in range(len(bars.get("ts", [])):
                 result.append({
-                    "timestamp": datetime.fromtimestamp(bars["ts"][i]),
+                    "timestamp": datetime.utcfromtimestamp(bars["ts"][i]),
                     "open": float(bars["open"][i]),
                     "high": float(bars["high"][i]),
                     "low": float(bars["low"][i]),

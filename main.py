@@ -193,14 +193,18 @@ class AITradingSystem:
             )
             self.logger.info("K棒數據更新服務已初始化")
             
-            # 登入時檢查並更新 K棒數據（只要連線成功就執行）
             if self.shioaji.connected:
-                self.logger.info("檢查 K棒數據更新...")
+                self.logger.info("檢查並更新 K棒數據...")
                 update_result = await self.data_updater.check_and_update_on_login()
                 if update_result.get('symbols_updated'):
                     self.logger.info(f"K棒數據更新完成: {update_result['symbols_updated']}")
                 if update_result.get('symbols_need_fetch'):
                     self.logger.info(f"需要抓取的期貨: {update_result['symbols_need_fetch']}")
+                
+                self.logger.info("補抓今日 K-bars...")
+                recovery_result = await self.data_updater.fetch_today()
+                if recovery_result.get('symbols_recovered'):
+                    self.logger.info(f"今日補抓完成: {recovery_result['symbols_recovered']}, {recovery_result['total_records']} 筆")
         
         # 設置策略運行器參考（讓模擬模式下能獲取動態價格）
         self.shioaji.set_strategy_runner(self.strategy_runner)
@@ -437,21 +441,36 @@ class AITradingSystem:
         """設置實盤 tick 回調"""
         def on_tick(exchange, tick):
             try:
+                self.logger.debug(f"收到 raw tick: {tick}")
                 if hasattr(tick, 'code') and hasattr(tick, 'close'):
-                    symbol = tick.code
-                    if symbol in ['TXF', 'MXF', 'TMF']:
+                    code = tick.code
+                    self.logger.debug(f"tick code: {code}")
+                    
+                    # 前缀匹配，提取基本代码
+                    # 例如：TMFC6, TMFR1 -> TMF
+                    base_symbol = None
+                    if code.startswith('TMF'):
+                        base_symbol = 'TMF'
+                    elif code.startswith('TXF'):
+                        base_symbol = 'TXF'
+                    elif code.startswith('MXF'):
+                        base_symbol = 'MXF'
+                    
+                    if base_symbol:
                         price = tick.close
                         volume = tick.volume if hasattr(tick, 'volume') else 0
                         timestamp = tick.datetime
                         
+                        self.logger.debug(f"處理 tick: {base_symbol} price={price}")
+                        
                         self.realtime_aggregator.process_tick(
-                            symbol=symbol,
+                            symbol=base_symbol,
                             price=price,
                             volume=volume,
                             timestamp=timestamp
                         )
                         
-                        self.shioaji.update_latest_price(symbol, price)
+                        self.shioaji.update_latest_price(base_symbol, price)
             except Exception as e:
                 self.logger.error(f"Tick 處理錯誤：{e}")
         
@@ -485,8 +504,18 @@ class AITradingSystem:
         """重連回調"""
         self.logger.info("Shioaji 重新連線")
         
-        # 重新訂閱 tick 回調（重連後需要重新設置）
         if not self.shioaji.skip_login:
+            if self.data_updater:
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        asyncio.create_task(self.data_updater.fetch_today())
+                    else:
+                        loop.run_until_complete(self.data_updater.fetch_today())
+                    self.logger.info("今日 K-bars 補抓已完成")
+                except Exception as e:
+                    self.logger.error(f"補抓今日 K-bars 失敗：{e}")
+            
             self._setup_tick_callback()
             self.logger.info("Tick 回調已重新訂閱")
         

@@ -104,8 +104,8 @@
         font-size: 11px;
         font-weight: bold;
     }
-    .badge-success { background: #d4edda; color: #155724; }
-    .badge-danger { background: #f8d7da; color: #721c24; }
+    .badge-success { background: rgba(63,185,80,0.15); color: var(--success); }
+    .badge-danger { background: rgba(248,81,73,0.15); color: var(--danger); }
 </style>
 {% endblock %}
 
@@ -228,7 +228,7 @@
             `;
         } else {
             perfHtml = `
-                <div class="perf-period" style="color: #999;">尚無交易紀錄</div>
+                <div class="perf-period" style="color: var(--text-secondary);">尚無交易紀錄</div>
             `;
         }
         

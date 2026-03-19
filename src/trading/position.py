@@ -42,12 +42,16 @@ class Position:
     
     def calculate_pnl(self, current_price: float) -> float:
         """計算未實現損益"""
+        # 確保價格為 float 類型，避免 Decimal 與 float 運算錯誤
+        current_price = float(current_price)
+        entry_price = float(self.entry_price)
+        
         self.current_price = current_price
         
         if self.direction == "Buy":
-            self.pnl = (current_price - self.entry_price) * self.quantity * self.point_value
+            self.pnl = (current_price - entry_price) * self.quantity * self.point_value
         else:  # Sell
-            self.pnl = (self.entry_price - current_price) * self.quantity * self.point_value
+            self.pnl = (entry_price - current_price) * self.quantity * self.point_value
         
         return self.pnl
     
@@ -56,20 +60,26 @@ class Position:
         if not self.stop_loss:
             return False
         
+        current_price = float(current_price)
+        stop_loss = float(self.stop_loss)
+        
         if self.direction == "Buy":
-            return current_price <= self.stop_loss
+            return current_price <= stop_loss
         else:
-            return current_price >= self.stop_loss
+            return current_price >= stop_loss
     
     def check_take_profit(self, current_price: float) -> bool:
         """檢查是否觸發止盈"""
         if not self.take_profit:
             return False
         
+        current_price = float(current_price)
+        take_profit = float(self.take_profit)
+        
         if self.direction == "Buy":
-            return current_price >= self.take_profit
+            return current_price >= take_profit
         else:
-            return current_price <= self.take_profit
+            return current_price <= take_profit
     
     def to_dict(self) -> dict:
         """轉換為字典"""

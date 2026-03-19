@@ -10,8 +10,9 @@
 | [AGENTS.md](../AGENTS.md) | Agent 開發指南（精簡版，~150 行） |
 | [Features.md](Features.md) | 功能說明、模擬模式、策略管理 |
 | [Web_Interface.md](Web_Interface.md) | Web 介面開發指南、API 端點 |
-| [System_Architecture.md](System_Architecture.md) | 系統架構、技術堆疊 |
+| [System_Architecture.md](System_Architecture.md) | 系統架構，技術堆疊 |
 | [User_Manual.md](User_Manual.md) | 使用手冊、安裝指南 |
+| [SQLite_Storage.md](SQLite_Storage.md) | SQLite 存儲規範、數據來源標記 |
 
 ## 文檔內容簡介
 
@@ -76,6 +77,15 @@ Web 介面開發完整指南：
 - 故障排除
 - FAQ
 
+### SQLite_Storage.md
+
+SQLite 存儲規範：
+- Symbol Mapping 規則
+- SQL 查詢規範
+- API 方法總覽
+- 數據來源標記（historical/initial/recovery/realtime）
+- 實盤即時 K 棒寫入說明
+
 ## 快速連結
 
 - [系統總覽](System_Architecture.md#1-系統概述)
@@ -83,3 +93,4 @@ Web 介面開發完整指南：
 - [策略建立流程](Web_Interface.md#策略建立頁面功能)
 - [API 端點](Web_Interface.md#api-列表)
 - [版本歷史](Features.md#13-版本資訊)
+- [SQLite 存儲規範](SQLite_Storage.md)

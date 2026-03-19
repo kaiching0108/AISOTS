@@ -1,6 +1,5 @@
 """Web Interface Flask Application"""
 from flask import Flask, render_template
-from flask_apscheduler import APScheduler
 from loguru import logger
 
 
@@ -31,42 +30,7 @@ def create_web_app(trading_tools, llm_provider=None, data_updater=None, connecti
     app.connection_mgr = connection_mgr
     app.strategy_runner = strategy_runner
     
-    # 初始化 Flask-APScheduler
-    if data_updater:
-        scheduler = APScheduler()
-        scheduler.init_app(app)
-        
-        # 從配置讀取每日更新時間
-        update_time_str = data_updater.config.get('update_time', '06:00')
-        hour, minute = map(int, update_time_str.split(':'))
-        
-        # 添加定時任務：每日更新 K棒數據
-        from datetime import datetime
-        
-        def scheduled_data_update():
-            """定時更新 K棒數據"""
-            logger.info("執行定時 K棒數據更新...")
-            try:
-                import asyncio
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                result = loop.run_until_complete(data_updater.scheduled_daily_update())
-                logger.info(f"定時更新結果: {result}")
-                loop.close()
-            except Exception as e:
-                logger.error(f"定時更新失敗: {e}")
-        
-        scheduler.add_job(
-            id='daily_data_update',
-            func=scheduled_data_update,
-            trigger='cron',
-            hour=hour,
-            minute=minute,
-            replace_existing=True
-        )
-        
-        scheduler.start()
-        logger.info(f"Flask-APScheduler 已啟動，每日 {update_time_str} 執行數據更新")
+
     
     # 註冊路由
     from src.web.routes import status, strategies, positions, risk, backtest

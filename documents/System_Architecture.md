@@ -299,7 +299,12 @@ User Command
 | 檔案 | 說明 |
 |------|--------|
 | `data_updater.py` | K 棒數據更新服務（每日定時抓取、啟動檢查） |
-| `realtime_kbar_aggregator.py` | 實時 K-bar 聚合器（tick 轉 K-bar） |
+| `realtime_kbar_aggregator.py` | 實時 K-bar 聚合器（tick 轉 K-bar），實盤時寫入 SQLite |
+
+**即時 K 棒寫入功能 (2026-03-16)**：
+- 實盤模式：tick 數據 → RealtimeKBarAggregator → 每分鐘寫入 SQLite（source='realtime'）
+- 模擬模式：不通過，即時資料寫入 SQLite
+- 圖表頁面每 15 秒輪詢更新，即時顯示最新走勢
 
 **Phase 7 修復說明：右側對齊 (2026-03-04)**
 ```python

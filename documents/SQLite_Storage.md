@@ -1,5 +1,38 @@
 # SQLite Storage 存儲規範
 
+## 0. 時間戳格式
+
+**重要**：SQLite 存儲的 ts 為**台北時間秒數**，讀取時必須使用 `datetime.utcfromtimestamp()` 解析。
+
+### 存儲格式
+- 時間戳以 **Unix 秒** 為單位存儲
+- Shioaji Kbars API 返回台北時間納秒 → 除以 1,000,000,000 → 存入 SQLite
+- Shioaji tick datetime 返回 UTC → timestamp() → 加 8 小時 → 存入 SQLite（變為台北時間秒數）
+
+### 讀取格式
+- **必須使用** `datetime.utcfromtimestamp(ts)` 解析
+- 如果使用 `datetime.fromtimestamp(ts)`，會被系統時區轉換兩次，導致錯誤
+
+### 相關代碼
+
+**存入（historical/initial/recovery）**：
+```python
+ts_sec = ts // 1_000_000_000  # 台北時間秒數
+```
+
+**存入（realtime）**：
+```python
+current_ts = int(timestamp.timestamp()) + 8 * 3600  # UTC 秒數 + 8 小時 = 台北時間秒數
+```
+
+**讀取**：
+```python
+dt = datetime.utcfromtimestamp(ts)  # 正確！
+# 錯誤：datetime.fromtimestamp(ts)  # 會被轉換兩次
+```
+
+---
+
 ## 1. Symbol Mapping 規則
 
 ### 存儲格式
@@ -161,7 +194,7 @@ CREATE TABLE IF NOT EXISTS fetch_log (
 ### 用途
 - 避免重複補抓已確認無資料的日期（假日）
 - 避免重複補抓已有資料的日期
-- 工作日缺口和交易時段異常檢查時排除已確認的日期
+- 工作日缺口和每日數據不足檢查時排除已確認的日期
 
 ---
 
@@ -183,23 +216,29 @@ result = sqlite.check_workday_gaps('TXFR1')
 ```
 
 ### check_trading_hours_completeness(symbol)
-檢查交易時段數據完整性（排除已確認的日期）。
+檢查每日數據完整性（排除 today 和已補抓的日期）。
+
+**檢查邏輯**：
+- **標準筆數**：1140 筆/天（19 小時交易時間）
+- **閾值**：**1140 筆**
+- **檢查時段**：00:00-23:59（完整 24 小時）
+- **排除條件**：
+  - `today`（當天數據尚未完整）
+  - 已在 `fetch_log` 中記錄的日期（無論 success 或 no_data）
 
 ```python
 result = sqlite.check_trading_hours_completeness('TXFR1')
 # 返回:
 {
-    "days_checked": 100,      # 檢查的天數
-    "avg_count": 830,         # 平均每天筆數
-    "suspicious_days": 1,      # 異常天數（低於平均95%）
-    "suspicious_details": [{   # 異常詳情
-        "date": "2026-03-06",
-        "count": 424,
-        "expected": 830,
-        "gap": 406
+    "days_checked": 317,         # 檢查的天數
+    "incomplete_days": 107,      # 筆數不足的日期數（< 1140 筆）
+    "incomplete_details": [{     # 不足詳情（前 10 個）
+        "date": "2026-03-17",
+        "count": 268,
+        "expected": 1140,
+        "gap": 872
     }],
-    "confirmed_no_data": 6,   # 已確認無資料的天數
-    "confirmed_with_data": 3  # 已確認有資料的天數
+    "confirmed_excluded": 25     # 已補抓被排除的天數
 }
 ```
 
@@ -242,10 +281,12 @@ dates = sqlite.get_confirmed_dates('TXFR1')
 
 ## 8. 時間戳格式規定
 
-**重要**：Shioaji API 返回的 timestamp 為**奈秒（nanoseconds）**格式，儲存到 SQLite 時需轉換為**秒（seconds）**。
+### Shioaji Kbars API（historical/initial/recovery）
+
+Shioaji API 返回的 timestamp 為**奈秒（nanoseconds）**格式，儲存到 SQLite 時需轉換為**秒（seconds）**。
 
 ```python
-# 奈秒 → 秒轉換
+# 奈秒 → 秒轉換（台北時間秒數）
 ts_sec = ts // 1_000_000_000 if isinstance(ts, (int, float)) and ts > 1e12 else int(ts)
 
 # 完整範例
@@ -258,6 +299,28 @@ kbars_data = {
     "close": list(kbars_raw.Close),
     "volume": list(kbars_raw.Volume),
 }
+```
+
+### Shioaji tick datetime（realtime）
+
+tick datetime 為 UTC 時間，轉換為台北時間秒數後存入 SQLite。
+
+```python
+# UTC 時間 → 台北時間秒數
+current_minute = timestamp.replace(second=0, microsecond=0)
+current_ts = int(current_minute.timestamp()) + 8 * 3600
+```
+
+### 讀取時間戳
+
+**重要**：讀取時必須使用 `utcfromtimestamp`，否則會被系統時區轉換兩次。
+
+```python
+# 正確
+dt_utc = datetime.utcfromtimestamp(ts)
+
+# 錯誤（會導致時間錯誤）
+dt_local = datetime.fromtimestamp(ts)
 ```
 
 ---
@@ -276,7 +339,7 @@ kbars_data = {
 | `get_count()` | 資料數量 |
 | `get_today_count()` | 今日數量 |
 | `check_workday_gaps()` | 檢查工作日缺口 |
-| `check_trading_hours_completeness()` | 檢查交易時段完整性 |
+| `check_trading_hours_completeness()` | 檢查每日數據完整性（1140 筆為標準） |
 | `log_fetch_attempt()` | 記錄補抓結果 |
 | `get_confirmed_no_data_dates()` | 獲取已確認無資料的日期 |
 | `get_confirmed_with_data_dates()` | 獲取已確認有資料的日期 |
@@ -328,8 +391,8 @@ kbars 表新增 `source` 字段，用於標記數據來源：
 | source 值 | 說明 |
 |----------|------|
 | `historical` | 歷史數據（預設值，舊數據） |
-| `initial` | 初始化抓取（系統啟動時） |
-| `daily` | 每日定時抓取 |
+| `initial` | 初始化抓取（系統啟動時，往歷史填補） |
+| `recovery` | 當日補抓（系統啟動或斷線重連後，補抓當日 00:00→now） |
 | `realtime` | 實盤即時寫入（tick 聚合） |
 
 ### 查詢示例
@@ -349,4 +412,4 @@ SELECT MAX(ts) as latest, source FROM kbars GROUP BY source;
 
 ---
 
-**最後更新**: 2026-03-16
+**最後更新**: 2026-03-19 (v3 - 簡化完整性檢查邏輯)

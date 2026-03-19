@@ -1,10 +1,6 @@
 auto_review:
   enabled: false
 data_update:
-  daily:
-    api_calls_per_day: 10
-    daily_max: 10000
-    records_per_call: 1000
   enabled: true
   initial_fetch:
     api_calls_per_day: 5
@@ -12,9 +8,8 @@ data_update:
     max_total: 300000
     records_per_call: 10000
   storage:
-    cleanup_threshold: 700000
-    max_records: 600000
-  update_time: 06:00
+    cleanup_threshold: 1000000
+    max_records: 900000
 llm:
   api_key: 
   base_url: https://opencode.ai/zen/v1
@@ -38,6 +33,7 @@ telegram:
   enabled: false
 trading:
   check_interval: 60
+  stale_order_timeout: 300
   trading_hours:
     day_end: '13:45'
     day_start: 08:45

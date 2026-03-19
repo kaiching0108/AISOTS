@@ -175,7 +175,7 @@ class KBarSQLite:
                         ts_val = int(ts_val)
                     
                     cursor = conn.execute("""
-                        INSERT OR IGNORE INTO kbars 
+                        INSERT OR REPLACE INTO kbars 
                         (symbol, ts, open_price, high_price, low_price, close_price, volume, source)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
@@ -211,6 +211,7 @@ class KBarSQLite:
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             actual_symbol = self.get_actual_code(symbol)
+            
             cursor = conn.execute("""
                 SELECT ts, open_price, high_price, low_price, close_price, volume
                 FROM kbars
@@ -235,7 +236,7 @@ class KBarSQLite:
             symbol: 期货代码（基本代码，会自动转换为实际合约代码）
             
         Returns:
-            最新 K 棒数据，if no则返回 None
+            最新 K 棒数据，如果无则返回 None
         """
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
@@ -243,6 +244,38 @@ class KBarSQLite:
                 SELECT ts, open_price, high_price, low_price, close_price, volume
                 FROM kbars
                 WHERE symbol = ?
+                ORDER BY ts DESC
+                LIMIT 1
+            """, (self.get_actual_code(symbol),))
+            
+            row = cursor.fetchone()
+            if row:
+                return {
+                    'ts': row['ts'],
+                    'open': row['open_price'],
+                    'high': row['high_price'],
+                    'low': row['low_price'],
+                    'close': row['close_price'],
+                    'volume': row['volume'],
+                }
+            return None
+    
+    def get_latest_today_kbar(self, symbol: str) -> Optional[Dict]:
+        """获取今日最新的 K 棒数据
+        
+        Args:
+            symbol: 期货代码（基本代码，会自动转换为实际合约代码）
+            
+        Returns:
+            今日最新 K 棒数据，如果无则返回 None
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute("""
+                SELECT ts, open_price, high_price, low_price, close_price, volume
+                FROM kbars
+                WHERE symbol = ?
+                AND DATE(datetime(ts, 'unixepoch')) = DATE('now', 'localtime')
                 ORDER BY ts DESC
                 LIMIT 1
             """, (self.get_actual_code(symbol),))
@@ -379,66 +412,58 @@ class KBarSQLite:
         }
     
     def check_trading_hours_completeness(self, symbol: str) -> dict:
-        """檢查交易時段數據完整性（08:46 ~ 23:59）- 排除已確認無資料的日期
+        """檢查每日完整性（簡化版：1140 筆為標準）
         
         Args:
             symbol: 期貨代碼
             
         Returns:
-            包含交易時段完整性統計的字典
+            包含每日完整性統計的字典
         """
-        import datetime
+        from datetime import datetime
         
         symbol = self.get_actual_code(symbol)
+        today = datetime.now().strftime('%Y-%m-%d')
         
-        confirmed_no_data = self.get_confirmed_no_data_dates(symbol)
-        confirmed_with_data = self.get_confirmed_with_data_dates(symbol)
-        confirmed_all = confirmed_no_data | confirmed_with_data
+        # 獲取已補抓的日期（無論成功或失敗都排除）
+        confirmed_dates = self.get_confirmed_dates(symbol)
         
         with sqlite3.connect(self.db_path) as conn:
+            # 查詢每日筆數（排除 today 和已補抓的日期）
             cursor = conn.execute("""
                 SELECT 
                     DATE(datetime(ts, 'unixepoch')) as trade_date,
                     COUNT(*) as count
                 FROM kbars
                 WHERE symbol = ?
-                AND DATE(datetime(ts, 'unixepoch')) IS NOT NULL
-                AND TIME(datetime(ts, 'unixepoch')) >= '08:46:00'
-                AND TIME(datetime(ts, 'unixepoch')) <= '23:59:59'
-                GROUP BY DATE(datetime(ts, 'unixepoch'))
-                ORDER BY trade_date
-            """, (symbol,))
-            daily_counts = {row[0]: row[1] for row in cursor.fetchall() if row[0]}
+                AND DATE(datetime(ts, 'unixepoch')) != ?
+                AND DATE(datetime(ts, 'unixepoch')) NOT IN (
+                    SELECT check_date FROM fetch_log WHERE symbol = ?
+                )
+                GROUP BY trade_date
+                ORDER BY trade_date DESC
+            """, (symbol, today, symbol))
+            
+            daily_counts = {row[0]: row[1] for row in cursor.fetchall()}
         
-        # 排除已確認的日期（無論成功或失敗）
-        for confirmed_date in confirmed_all:
-            daily_counts.pop(confirmed_date, None)
-        
-        if not daily_counts:
-            return {"days_checked": 0, "avg_count": 0, "suspicious_days": 0}
-        
-        counts = list(daily_counts.values())
-        avg_count = sum(counts) / len(counts)
-        
-        threshold = avg_count * 0.95
-        suspicious = []
+        # 檢查每一天的筆數（閾值 = 1140）
+        THRESHOLD = 1140
+        incomplete = []
         
         for date, count in daily_counts.items():
-            if count < threshold:
-                suspicious.append({
+            if count < THRESHOLD:
+                incomplete.append({
                     "date": date,
                     "count": count,
-                    "expected": round(avg_count, 0),
-                    "gap": round(avg_count - count, 0)
+                    "expected": 1140,
+                    "gap": int(1140 - count)
                 })
         
         return {
             "days_checked": len(daily_counts),
-            "avg_count": round(avg_count, 0),
-            "suspicious_days": len(suspicious),
-            "suspicious_details": suspicious[:10],
-            "confirmed_no_data": len(confirmed_no_data),
-            "confirmed_with_data": len(confirmed_with_data),
+            "incomplete_days": len(incomplete),
+            "incomplete_details": incomplete[:10],
+            "confirmed_excluded": len(confirmed_dates),
         }
     
     def log_fetch_attempt(self, symbol: str, check_date: str, records_fetched: int, status: str, fetch_type: str = 'daily') -> None:
